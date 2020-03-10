@@ -16,7 +16,7 @@ parameter {σ : @signature sort _}
 -- individuals
 -- Notice that "term" for Aristotle is, in the context of a categorical syllogism,
 -- almost the opposite of what "term" in mathematical logic means.
-def atomo := @term sort _ σ
+def atomo := @uterm sort _ σ
 
 -- Aristotelian terms.
 -- Those will be monadic predicates in the signature,

@@ -1,4 +1,4 @@
-import formal_system data.set.finite init.data.list
+import formal_system data.set.finite init.data.list tactic.find
 universe u
 
 -- We introduce predicate logic.
@@ -28,9 +28,8 @@ def arity (f : functional_symbol) := length f.domain
 
 def is_constant (f : functional_symbol) := arity f = 0
 
-@[reducible]
 def tail_symbol (f : functional_symbol) : functional_symbol :=
-{ name := f.name ++ "tail",
+{ name := f.name ++ "tail_",
   domain := tail f.domain,
   codomain := f.codomain}
 
@@ -57,8 +56,9 @@ structure signature :=
     (unique_name₂ : ∀ r₁ r₂ : relational_symbol, r₁ ∈ sr → r₂ ∈ sr → r₁.name ≠ r₂.name)
     (unique_name₃ : ∀ (r₁ : relational_symbol) (f₂ : functional_symbol), r₁ ∈ sr → f₂ ∈ sf → r₁.name ≠ f₂.name)
     -- support for partial application.
-    (head_project : ∀ f ∈ sf, tail_symbol f ∈ sf)
+    -- (head_project : ∀ f ∈ sf, tail_symbol f ∈ sf)
 
+section terms
 parameter {σ : signature}
 
 def in_use  (s : sort) := 
@@ -66,6 +66,7 @@ def in_use  (s : sort) :=
     ∨ (∃ r : relational_symbol, r ∈ σ.sr ∧ s ∈ r.sig)
 
 def nary (n : ℕ) := subtype {f : functional_symbol | f ∈ σ.sf ∧ arity f = n}
+
 @[reducible]
 def const := nary 0
 
@@ -99,19 +100,24 @@ begin
 end
 
 -- Note: for lack of support for nested inductive types, 
--- you can't switch (fin n → pre_term) for (vector pre_term n) in the definition.
+-- you can't switch (fin n → uterm) for (vector uterm n) in the definition.
 -- See: https://leanprover-community.github.io/archive/113488general/48465nestedinductivetype.html
-inductive pre_term
-| var : tvariable → pre_term
-| app  {n : ℕ} (f : nary n) (v : fin n → pre_term) :  pre_term
+-- This is the type of untyped terms of the signature, which is to say that they are terms but we don't
+-- pay attention to their type, only the arity of the signature functions matters.
+-- We can later introduce typed terms by type checking the untyped ones.
+inductive uterm
+| var : tvariable → uterm
+| app  {n : ℕ} (f : nary n) (v : fin n → uterm) :  uterm
 
-def pre_tem.const : const → pre_term
-| c := pre_term.app c fin_zero_elim
+-- constant terms.
+def const.uterm : const → uterm
+| c := uterm.app c fin_zero_elim
 
-#check nat.decidable_eq
-#check cast
+def uterm.app_vector {n : ℕ} (f : nary n) (v : vector uterm n) : uterm :=
+    uterm.app f (λ m, v.nth m)
 
-instance deq_pre_term : decidable_eq pre_term :=
+-- syntatic equality between untyped terms.
+instance deq_uterm : decidable_eq uterm :=
 begin
     intros x y,
     -- ⟨f_y, fy_in_σ, fy_arity⟩
@@ -121,7 +127,50 @@ begin
     try{apply_instance},
     suffices h : decidable (f_x == f_y ∧ x_v == y_v),
         from @and.decidable _ _ _ h,
-    tidy,
+    have h : decidable(f_x == f_y) := ( 
+        if z : n_x = n_y 
+        then by {
+            have teq : nary n_x = nary n_y,
+                rw z,
+            let f := cast teq f_x,
+            have h : f == f_x := cast_heq teq f_x,
+            have deq : decidable (f == f_y),
+                cases logic.deq_nary n_y f f_y with c₁ c₂,
+                    left, intro hyp,
+                    have c := eq_of_heq hyp,
+                    contradiction,
+                right,
+                exact heq_of_eq c₂,
+            cases deq,
+                left, intro hyp,
+                have c := heq.trans h hyp,
+                contradiction,
+            right,
+            replace h := heq.symm h,
+            exact heq.trans h deq
+        }
+            -- exact @and.decidable _ _ deq h}
+        else by {
+            left, intro h,
+            let f := λ (n : ℕ) (x : nary n), (@arity sort _)(subtype.val x) = n_x,
+                work_on_goal 1 {exact σ},
+            -- have c := type_eq_of_heq h, 
+
+            have c₁ : (f n_x f_x) := f_x.property.right,
+            -- have c := heq.subst h c₁,
+                -- @heq.elim (nary n_x) f_x f f_y h c₁,
+            -- let f := cast c f_x,
+            -- have z : f == f_x := cast_heq c f_x,
+            -- apply heq.rec_on h,
+
+            have c₂ := f_y.property.right,
+            admit
+        }
+    ),
+        
+    -- have h : decidable(f_x == f_y),
+        -- tidy,
+        -- suffices h : decidable (x_v == y_v),
     admit,
     -- have c 
     --     := (@subtype.decidable_eq functional_symbol 
@@ -160,367 +209,414 @@ begin
 end
 
 -- My original inclination was to write:
--- | (pre_term.app f v) := pre_term.app f (pre_term.rewrite ∘ v)
+-- | (uterm.app f v) := uterm.app f (uterm.rewrite ∘ v)
 -- But apparently lean doesn't reduce the ∘ that easily.
 
-def pre_term.rewrite (x : tvariable) (t : pre_term) : pre_term → pre_term
-| (pre_term.var a) := if x = a then t else pre_term.var a
-| (pre_term.app f v) := 
-    let v₂ := λ m, pre_term.rewrite (v m) in
-    pre_term.app f v₂
+def uterm.rewrite : uterm → tvariable → uterm → uterm
+| (uterm.var a) x t := if x = a then t else uterm.var a
+| (uterm.app f v) x t := 
+    let v₂ := λ m, uterm.rewrite (v m) x t in
+    uterm.app f v₂
 
-def pre_term.variables : pre_term → set tvariable
-| (pre_term.var a) := {a}
-| (pre_term.app f v) :=
-    let v₂ := λ m, pre_term.variables (v m) in
+def uterm.variables : uterm → set tvariable
+| (uterm.var a) := {a}
+| (uterm.app f v) :=
+    let v₂ := λ m, uterm.variables (v m) in
     ⋃ m, v₂ m
 
-def pre_term.list_variables : list pre_term → set tvariable
+lemma uterm.nvar_rw (τ : uterm) (x : tvariable) (t : uterm) : x ∉ τ.variables → τ.rewrite x t = τ :=
+begin
+    intros h,
+    induction τ;
+    dunfold uterm.rewrite,
+        have c : x ∉ {τ} := h,
+        simp at c,
+        simp [c],
+    simp,
+    ext m,
+    apply τ_ih m,
+    have c : x ∉ ⋃ m, (τ_v m).variables := h,
+    simp at c,
+    exact c m
+ end
+
+
+lemma uterm.nvar_rw₂ (τ : uterm) (x y : tvariable) (t : uterm) (h : y ∈ τ.variables) : x ≠ y → y ∈ (τ.rewrite x t).variables :=
+begin
+    intro hyp,
+    induction τ;
+    dunfold uterm.rewrite,
+        replace h : y ∈ {τ} := h,
+        simp at h,
+        by_cases c : x = τ,
+            rw ←h at c,
+            contradiction,
+        simp [c],
+        dunfold uterm.variables,
+        simp [h],
+    dunfold uterm.variables,
+    simp,
+    have c : y ∈ ⋃ m, (τ_v m).variables := h,
+    simp at c,
+    cases c with i c,
+    existsi i,
+    apply τ_ih i,
+    exact c
+end
+
+def list_variables : list uterm → set tvariable
 | [] := ∅
-| (hd :: tl) := pre_term.variables hd ∪ pre_term.list_variables tl
+| (hd :: tl) := hd.variables  ∪ list_variables tl
 
-def pre_term.denotes (t : pre_term) :=
-    pre_term.variables t = ∅
+def list_rewrite : list uterm → tvariable → uterm → list uterm
+| [] _ _:= ∅
+| (hd :: tl) x t := (hd.rewrite x t) :: list_rewrite tl x t
 
-def typing : pre_term → sort
-| (pre_term.var ⟨s, _, _⟩) := s
-| (pre_term.app f _) := f.val.codomain
+def fn_rewrite {n : ℕ} (v : fin n → uterm) : tvariable → uterm → list uterm :=
+    list_rewrite (of_fn v)
 
-def type_check {n} (l : list sort) (v : fin n → pre_term) : Prop :=
-map typing (of_fn v) = l
+def vector_rewrite {n : ℕ} : vector uterm n → tvariable → uterm → vector uterm n
+| v x t := ⟨list_rewrite v.val x t, by admit⟩
 
-inductive consistently_typed : pre_term → Prop
-| base {x : tvariable} : consistently_typed (pre_term.var x)
-| app {n : ℕ} (f : nary n) (v : fin n → pre_term) 
-    (h₀ : ∀ x, consistently_typed (v x)) (h₁ : type_check f.val.domain v) 
-    : consistently_typed (pre_term.app f v) 
-
-structure term :=
-    (syntax : pre_term)
-    (check : consistently_typed syntax)
-
-def type_matches (x : tvariable) (t : term) :=
-    typing (pre_term.var x) = typing (t.syntax)
-
--- typing (pre_term.var x) = typing t₁.syntax →
-theorem rewrite_consistent : ∀ (x : tvariable) (t₁ t₂ : term) (h : type_matches x t₁), consistently_typed (pre_term.rewrite x t₁.syntax t₂.syntax) :=
+lemma list_variables_nvar_rw₂ (xs : list uterm) (x y : tvariable) (t : uterm) (h : y ∈ list_variables xs) : x ≠ y → y ∈ list_variables (list_rewrite xs x t) :=
 begin
-    intros x t₁ t₂ h,
-    induction (t₁.syntax.rewrite x t₂.syntax),
-        exact consistently_typed.base,
-    simp at *,
-    refine consistently_typed.app f v ih _,
-    unfold type_check,
-    induction c : (of_fn v),
-        simp [c] at *,
-        ext,
-        admit,
-    admit
+    intro hyp,
+    induction xs with hd tl ih,
+        replace h : false := h,
+        contradiction,
+    dunfold list_rewrite list_variables,
+    cases h,
+        left,
+        exact hd.nvar_rw₂ x y t h hyp,
+    right,
+    exact ih h
 end
 
-def term.rewrite (x : tvariable) (t : term) (h : type_matches x t) : term → term :=
-begin
-    intro target,
-    fsplit,
-    exact t.syntax.rewrite x target.syntax,
-    exact rewrite_consistent x t target h,
-end
 
--- term typing
-def ttyping : term → sort
-| t := typing t.syntax
+def uterm.denotes (t : uterm) :=
+    uterm.variables t = ∅
 
-lemma term.rewrite_typing (x : tvariable) (t₁ : term) (h : type_matches x t₁)
-                          (t₂ : term)
-                          : ttyping (t₁.rewrite x h t₂) =  ttyping t₂ :=
-sorry
+-- untyped atomic formulas.
+inductive uatomic_formula
+| relational {n : ℕ} (r : nrary n) (v : fin n → uterm) : uatomic_formula
+| equation (t₁ t₂ : uterm) : uatomic_formula
+| true : uatomic_formula
+| false : uatomic_formula
 
--- term type_check
-def ttc {n} (l : list sort) (v : fin n → term) : Prop :=
-map ttyping (of_fn v) = l
-
-structure name extends term :=
-    (denotative : pre_term.denotes syntax)
-
-structure expression extends term :=
-    (has_var : ¬ pre_term.denotes syntax)
-
-inductive atomic_formula
-| relational {n : ℕ} (r : nrary n) (v : fin n → term)
-    (h : ttc r.val.sig v) : atomic_formula
-| equation (t₁ t₂ : term) : atomic_formula
-| true : atomic_formula
-| false : atomic_formula
-
-def atomic_formula.variables : atomic_formula → set tvariable
-| (atomic_formula.relational r v h) :=
-    let  v₂ := term.syntax ∘ v
-    in pre_term.list_variables (of_fn v₂)
-| (atomic_formula.equation t₁ t₂) := 
-    pre_term.variables t₁.syntax
-    ∪ pre_term.variables t₂.syntax
+def uatomic_formula.variables : uatomic_formula → set tvariable
+| (uatomic_formula.relational r v) := list_variables (of_fn v)
+| (uatomic_formula.equation t₁ t₂) := t₁.variables  ∪ t₂.variables
 | _ := ∅
 
-open list
+def uatomic_formula.rewrite : uatomic_formula → tvariable → uterm → uatomic_formula
+| (uatomic_formula.relational r v) x t :=
+    let v₂ := λ m, (v m).rewrite x t in
+    uatomic_formula.relational r v₂
+| (uatomic_formula.equation t₁ t₂) x t :=
+    let t₃ := t₁.rewrite x t,
+        t₄ := t₂.rewrite x t
+    in uatomic_formula.equation t₃ t₄
+| φ _ _ := φ
 
-def atomic_formula.rewrite (x : tvariable) (t : term) (h₀ : type_matches x t) : atomic_formula → atomic_formula
-| (@atomic_formula.relational _ _ _ n r v h) := 
-    let v₂ := (term.rewrite x t h₀) ∘ v in
-    begin
-    refine atomic_formula.relational r v₂ _,
-    simp [ttc] at *,
-    cases c : of_fn v,
-        rw c at h,
-        simp at h,
-        replace h := eq.symm h,
-        have neq :=  r.val.sig_not_empty,
-        contradiction,
-    rw [←h],
-    have conc := t.rewrite_typing x h₀,
-    -- cases c₂ : of_fn v₂,
-    -- simp, library_search,
-    -- simp [v₂,  c, function.comp],
-    ext, constructor; intro hyp;
+lemma uatomic_formula.nvar_rw₂ (φ : uatomic_formula) (x y : tvariable) (t : uterm) (h : y ∈ φ.variables) : x ≠ y → y ∈ (φ.rewrite x t).variables :=
+begin
+    intro hyp,
+    induction φ;
+    -- any_goals {
+    --     replace h : y ∈ list_variables (of_fn φ_v) := h,
+    --     have c := list_variables_nvar_rw₂ (of_fn φ_v) x y t h hyp,
+    -- };
+    dunfold uatomic_formula.rewrite;
     simp * at *,
-    rcases hyp with ⟨y, hyp₁, hyp₂⟩,
-        simp [v₂] at *,
+        dunfold uatomic_formula.variables,
+        replace h : y ∈ list_variables (of_fn φ_v) := h,
+        have c := list_variables_nvar_rw₂ (of_fn φ_v) x y t h hyp,
+        cases c₀ : (of_fn φ_v),
+            rw c₀ at h,
+            simp [list_variables] at h,
+            contradiction,
+    -- rw c₀ at c,
+    -- revert c,
+    -- dunfold list_rewrite list_variables,
+    -- rintro (c₁ | c₂),
+    convert c,
+    ext m, constructor; intro h₂,
+
+        
     
-        
-        
-    -- suffices c : 
-    --     map ttyping (of_fn v₂)
-    --     = map ttyping (of_fn v),
-    --     dsimp [ttc] at *,
-    --     rw c,
-    --     exact h,
-    -- dsimp [map],
-    -- ext, constructor; intro hyp;
-    -- simp * at *;
-    -- rcases hyp with ⟨x, hyp₁, hyp₂⟩,
-    --     existsi x,
-    --     simp [v₂, hyp₂] at *,
-    -- admit,
-    end
-| (atomic_formula.equation t₁ t₂) := 
-    let t₁ := t.rewrite x h₀ t₁,
-        t₂ := t.rewrite x h₀ t₂ 
-    in atomic_formula.equation t₁ t₂
-| φ := φ
 
+end
 
-inductive pre_formula
-| atomic : atomic_formula → pre_formula 
-| for_all :  tvariable → pre_formula → pre_formula
-| exist   : tvariable → pre_formula → pre_formula
-| and : pre_formula → pre_formula → pre_formula
-| or : pre_formula → pre_formula → pre_formula
-| if_then : pre_formula → pre_formula → pre_formula
+-- untyped formulas. 
+-- Not requiring quantified variables to be free.
+inductive uformula
+| atomic : uatomic_formula → uformula 
+| for_all :  tvariable → uformula → uformula
+| exist   : tvariable → uformula → uformula
+| and : uformula → uformula → uformula
+| or : uformula → uformula → uformula
+| if_then : uformula → uformula → uformula
 
-def pre_formula.is_atomic : pre_formula → Prop
-| (logic.pre_formula.atomic _) := true
+def uformula.is_atomic : uformula → Prop
+| (uformula.atomic _) := true
 | _ := false
 
-def pre_formula.is_molecular : pre_formula → Prop
-| (logic.pre_formula.atomic _) := true
-| (logic.pre_formula.and φ ψ) :=
-    pre_formula.is_molecular φ
-    ∧ pre_formula.is_molecular ψ
-| (logic.pre_formula.or φ ψ) :=
-    pre_formula.is_molecular φ
-    ∧ pre_formula.is_molecular ψ
-| (logic.pre_formula.if_then φ ψ) :=
-    pre_formula.is_molecular φ
-    ∧ pre_formula.is_molecular ψ
+instance uformula.lift : has_lift uatomic_formula uformula := ⟨uformula.atomic⟩
+
+def uformula.is_molecular : uformula → Prop
+| (uformula.atomic _)    :=  true
+| (uformula.and φ ψ)     :=  φ.is_molecular ∧ ψ.is_molecular
+| (uformula.or φ ψ)      :=  φ.is_molecular ∧ ψ.is_molecular
+| (uformula.if_then φ ψ) :=  φ.is_molecular ∧ ψ.is_molecular
 | _ := false
 
-def pre_formula.free_variables : pre_formula → set tvariable
-| (logic.pre_formula.atomic φ) := atomic_formula.variables φ
-| (logic.pre_formula.for_all x φ) := pre_formula.free_variables φ - {x}
-| (logic.pre_formula.exist x φ) := pre_formula.free_variables φ - {x}
-| (logic.pre_formula.and φ ψ) := 
-    pre_formula.free_variables φ 
-    ∪ pre_formula.free_variables ψ
-| (logic.pre_formula.or φ ψ) :=
-    pre_formula.free_variables φ 
-    ∪ pre_formula.free_variables ψ
-| (logic.pre_formula.if_then φ ψ) :=
-    pre_formula.free_variables φ 
-    ∪ pre_formula.free_variables ψ
+-- free variables
+def uformula.free : uformula → set tvariable
+| (uformula.atomic φ)    := φ.variables 
+| (uformula.for_all x φ) := φ.free - {x}
+| (uformula.exist x φ)   := φ.free - {x}
+| (uformula.and φ ψ)     := φ.free ∪ ψ.free
+| (uformula.or φ ψ)      := φ.free ∪ ψ.free
+| (uformula.if_then φ ψ) := φ.free ∪ ψ.free 
 
-def pre_formula.bound_variables : pre_formula → set tvariable
-| (logic.pre_formula.atomic φ) := ∅
-| (logic.pre_formula.for_all x φ) := pre_formula.bound_variables φ ∪ {x}
-| (logic.pre_formula.exist x φ) := pre_formula.bound_variables φ ∪ {x}
-| (logic.pre_formula.and φ ψ) := 
-    pre_formula.bound_variables φ 
-    ∩ pre_formula.bound_variables ψ
-| (logic.pre_formula.or φ ψ) :=
-    pre_formula.bound_variables φ 
-    ∩ pre_formula.bound_variables ψ
-| (logic.pre_formula.if_then φ ψ) :=
-    pre_formula.bound_variables φ 
-    ∩ pre_formula.bound_variables ψ
+-- open and closed formulas.
+def uformula.closed : uformula → Prop
+| φ := φ.free = ∅
 
-def pre_formula.rewrite (x : tvariable) (t : pre_term) : pre_formula → pre_formula
-| (logic.pre_formula.atomic a) := _
-| (logic.pre_formula.for_all a a_1) := _
-| (logic.pre_formula.exist a a_1) := _
-| (logic.pre_formula.and a a_1) := _
-| (logic.pre_formula.or a a_1) := _
-| (logic.pre_formula.if_then a a_1) := _
+def uformula.open : uformula → Prop
+| φ := ¬ φ.closed
 
-
-inductive well_formed : pre_formula → Prop
-| atomic (φ : atomic_formula) : well_formed (pre_formula.atomic φ)
-| for_all (x : tvariable) (φ : pre_formula)
-          (h₁ : well_formed φ) (h₂ : x ∈ pre_formula.free_variables φ)
-          : well_formed (pre_formula.for_all x φ)
-| exist   (x : tvariable) (φ : pre_formula)
-          (h₁ : well_formed φ) (h₂ : x ∈ pre_formula.free_variables φ)
-          : well_formed (pre_formula.exist x φ)
-| and (φ ψ : pre_formula)
-      (h₁ : well_formed φ)
-      (h₂ : well_formed ψ)
-      : well_formed (pre_formula.and φ ψ)
-| or (φ ψ : pre_formula)
-     (h₁ : well_formed φ)
-     (h₂ : well_formed ψ) 
-     : well_formed (pre_formula.or φ ψ)
-| if_then (φ ψ : pre_formula)
-          (h₁ : well_formed φ)
-          (h₂ : well_formed ψ) 
-          : well_formed (pre_formula.if_then φ ψ)
-
-
-structure wff :=
-    (formula : pre_formula)
-    (well_formed : well_formed formula)
-
-def wff.and : wff → wff → wff
-| ⟨φ, h₁⟩ ⟨ψ, h₂⟩ := ⟨pre_formula.and φ ψ,
-                      well_formed.and φ ψ h₁ h₂⟩
-
-def wff.or : wff → wff → wff
-| ⟨φ, h₁⟩ ⟨ψ, h₂⟩ := ⟨pre_formula.or φ ψ,
-                      well_formed.or φ ψ h₁ h₂⟩
-
-def wff.if_then : wff → wff → wff
-| ⟨φ, h₁⟩ ⟨ψ, h₂⟩ := ⟨pre_formula.if_then φ ψ,
-                      well_formed.if_then φ ψ h₁ h₂⟩
-def wff.true : wff :=
-{ formula := pre_formula.atomic atomic_formula.true,
-  well_formed := well_formed.atomic _ 
-}
-
-instance wff.has_exp : has_exp wff := ⟨wff.if_then⟩
-
-def assertive (φ : pre_formula) := pre_formula.free_variables φ = ∅
-def conotative (φ : pre_formula) := ¬ assertive φ
-
-structure sentence extends wff :=
-    (assertive : assertive formula)
-
-structure predicate extends wff :=
-    (conotative : conotative formula)
-
--- theorem finite_num_var : ∀ φ : pre_formula, finite (pre_formula.free_variables φ) := 
+-- instance dec_free (φ : uformula) : decidable_pred φ.free :=
 -- begin 
---     intros φ,
---     repeat {induction φ},
---     -- repeat {fsplit},
---     -- unfold multiset,
---     -- work_on_goal 2 { intros x,
---     -- cases x,
---     -- simp at * },
+--     intros x,
+--     cases φ,
+    
+--     -- try{apply_instance},
 -- end
 
-inductive wff.entails : set wff → wff → Prop
-| reflexive (Γ : set wff) (φ : wff)(h : φ ∈ Γ) : wff.entails Γ φ
-| transitivity (Γ Δ : set wff) (φ : wff)
-               (h₁ : ∀ ψ ∈ Δ, wff.entails Γ ψ)
-               (h₂ : wff.entails Δ φ) :  wff.entails Γ φ
-| and_intro (φ ψ : wff) (Γ : set wff)
-            (h₁ : wff.entails Γ φ)
-            (h₂ : wff.entails Γ ψ)
-             : wff.entails Γ (wff.and φ ψ)
-| and_elim_left (φ ψ : wff) (Γ : set wff)
-            (h : wff.entails Γ (wff.and φ ψ))
-             : wff.entails Γ φ
-| and_elim_right (φ ψ : wff) (Γ : set wff)
-            (h : wff.entails Γ (wff.and φ ψ))
-             : wff.entails Γ ψ
-| or_intro_left 
-            (φ ψ : wff) (Γ : set wff)
-            (h : wff.entails Γ φ)
-             : wff.entails Γ (wff.or φ ψ)
-| or_intro_right 
-            (φ ψ : wff) (Γ : set wff)
-            (h : wff.entails Γ ψ)
-             : wff.entails Γ (wff.or φ ψ)
-| or_elim
-            (φ ψ δ : wff) (Γ : set wff)
-            (h₁ : wff.entails Γ (wff.or φ ψ))
-            (h₂ : wff.entails (Γ ∪ {φ}) δ)
-            (h₃ : wff.entails (Γ ∪ {ψ}) δ)
-             : wff.entails Γ δ
-| modus_ponens
-            (φ ψ : wff) (Γ : set wff)
-            (h₁ : wff.entails Γ (φ ⇒ ψ))
-            (h₂ : wff.entails Γ φ)
-             : wff.entails Γ ψ
-| intro
-            (φ ψ : wff) (Γ : set wff)
-            (h : wff.entails (Γ ∪ {φ}) ψ)
-             : wff.entails Γ (φ ⇒ ψ)
-| true_intro
-            (Γ : set wff)
-             : wff.entails Γ wff.true
-| true_intro
-            (Γ : set wff) (φ : wff)
-            (x : tvariable)
-            (free : x ∈ pre_formula.free_variables φ.formula)
-            (h : ∀ t : term wff.entails (Γ ∪ {φ}) ψ)
-             : wff.entails Γ wff.true
+def uformula.variables : uformula → set tvariable
+| (uformula.atomic φ)    := φ.variables 
+| (uformula.for_all x φ) := φ.free ∪ {x}
+| (uformula.exist x φ)   := φ.free ∪ {x}
+| (uformula.and φ ψ)     := φ.variables ∪ ψ.variables
+| (uformula.or φ ψ)      := φ.variables ∪ ψ.variables
+| (uformula.if_then φ ψ) := φ.variables ∪ ψ.variables
 
--- let l := of_fn v in
--- map typing l = f.val.domain
--- ∧ ∀ x ∈ l, consistently_typed x
+-- def uformula.bound_variables : uformula → set tvariable
+-- | (logic.uformula.atomic φ) := ∅
+-- | (logic.uformula.for_all x φ) := uformula.bound_variables φ ∪ {x}
+-- | (logic.uformula.exist x φ) := uformula.bound_variables φ ∪ {x}
+-- | (logic.uformula.and φ ψ) := 
+--     uformula.bound_variables φ 
+--     ∩ uformula.bound_variables ψ
+-- | (logic.uformula.or φ ψ) :=
+--     uformula.bound_variables φ 
+--     ∩ uformula.bound_variables ψ
+-- | (logic.uformula.if_then φ ψ) :=
+--     uformula.bound_variables φ 
+--     ∩ uformula.bound_variables ψ
 
+def uformula.rewrite : uformula → tvariable → uterm → uformula
+| (uformula.atomic φ) x t    := ↑(φ.rewrite x t)
+| (uformula.for_all y φ) x t :=
+    let ψ := if y = x then φ else φ.rewrite x t in
+    uformula.for_all y ψ
+| (uformula.exist y φ) x t := 
+    let ψ := if y = x then φ else φ.rewrite x t in
+    uformula.exist y ψ
+| (uformula.and φ ψ) x t     := uformula.and (φ.rewrite x t) (ψ.rewrite x t)
+| (uformula.or φ ψ)  x t     := uformula.or (φ.rewrite x t) (ψ.rewrite x t)
+| (uformula.if_then φ ψ) x t := uformula.if_then (φ.rewrite x t) (ψ.rewrite x t)
+
+-- lemma uformula.rw_free : ∀ (φ : uformula) (x : tvariable) (t : uterm), φ.free - {x} ⊆ (φ.rewrite x t).free :=
 -- begin
---     cases h : f.val.domain, exact true,
---     cases hyp : n with n₀, exact true,
---     have wfr : n₀ < n, -- for proving well-founded recursion
---         rw hyp, 
---         exact nat.lt_succ_self n₀,
---     have c := nat.zero_lt_succ n₀,
---     have z : fin (nat.succ n₀) := ⟨0, c⟩,
---     refine typing _ = [hd] ∧ consistently_typed _,
---         rw hyp at v, exact (v z),
---     right, work_on_goal 2 {exact n₀},
---     constructor, 
---     work_on_goal 1{
---         constructor,
---         exact f.val.name ++ "tail",
---         exact tl,
---         exact f.val.codomain,
---     },
---         constructor,
---         have c₂ := (σ.head_project f.val f.property.left),
---         simp [tail_symbol] at c₂,
---         rwa h at c₂,
---         simp [arity],
---         replace c₂ : tl = tail f.val.domain,
---             simp [h],
---         simp [c₂],
---         replace c₂ : length f.val.domain = n := f.property.right,
---         rw [c₂, hyp],
---         refl,
---     rintros ⟨x, hx⟩,
---     refine v ⟨x+1, _⟩, rw hyp,
---     exact nat.lt_succ_iff.mpr hx
--- end
--- using_well_founded { rel_tac := _,
--- dec_tac := `[rw hyp, exact nat.lt_succ_self n₀] }
+--  intros φ x t y h,
+--  cases h with h₁ h₂,
+--  simp at *,
+--  cases φ;
+--  dunfold uformula.rewrite,
+--  replace h₁ : y ∈ (uatomic_formula.relational φ_r φ_v).variables := h₁,
 
+ 
+-- --  dunfold uformula.free at h₁,
+-- --  dunfold uterm.rewrite,
+ 
+-- --  dunfold ,
+-- end
+
+-- -- rewriting a bound variable is the same as keeping the formula as it is.
+-- lemma uformula.rw_bnd (x : tvariable) (t : uterm) (φ : uformula) : x ∉ φ.free → φ.rewrite x t = φ :=
+-- begin
+--     intros h,
+--     induction φ,
+--     replace h : x ∉ φ.variables := h, 
+-- end
+
+lemma uformula.rw_bnd (x y : tvariable) (t : uterm) (φ : uformula) (h : y ∈ φ.free) : x ≠ y → y ∈ (φ.rewrite x t).free :=
+begin
+    intro hyp,
+    induction φ;
+    dunfold uformula.rewrite;
+    simp * at *,
+        focus {
+            -- exact list_variables_nvar_rw₂,
+            -- dunfold uformula.lift,
+            -- admit
+            -- dunfold uformula.free,
+        },
+    all_goals {cases h with h₁ h₂},
+    any_goals {
+        by_cases c : φ_a = x;
+        simp [c];
+        dunfold uformula.free,
+        rw c at h₂,
+        exact ⟨h₁, h₂⟩,
+    simp [h₂],
+    apply φ_ih,
+    exact h₁,
+    },
+    all_goals {
+        dunfold uformula.free,
+        {left, apply φ_ih_a, assumption} <|>
+        {right, apply φ_ih_a_1, assumption},
+    }
+end
+
+
+-- checks whether variables bound by a quantifier are free in the rest of the expression.
+def uformula.well_formed : uformula → Prop
+| (uformula.atomic φ)    := true
+| (uformula.for_all x φ) := x ∈ φ.free ∧ φ.well_formed
+| (uformula.exist x φ)   := x ∈ φ.free ∧ φ.well_formed
+| (uformula.and φ ψ)     := φ.well_formed ∧ ψ.well_formed
+| (uformula.or φ ψ)      := φ.well_formed ∧ ψ.well_formed
+| (uformula.if_then φ ψ) := φ.well_formed ∧ ψ.well_formed
+
+-- The type of untyped well formed formulas.
+def uwff := subtype uformula.well_formed
+
+-- utilities
+def uwff.and : uwff → uwff → uwff
+| ⟨φ, h₁⟩ ⟨ψ, h₂⟩ := ⟨uformula.and φ ψ,
+                      by constructor; assumption⟩
+
+def uwff.or : uwff → uwff → uwff
+| ⟨φ, h₁⟩ ⟨ψ, h₂⟩ := ⟨uformula.or φ ψ,
+                      by constructor; assumption⟩
+
+def uwff.if_then : uwff → uwff → uwff
+| ⟨φ, h₁⟩ ⟨ψ, h₂⟩ := ⟨uformula.if_then φ ψ,
+                      by constructor; assumption⟩
+
+instance uwff.has_exp : has_exp uwff := ⟨uwff.if_then⟩
+
+instance uwff.lift : has_lift uatomic_formula uwff := ⟨λ φ, ⟨↑φ, true.intro⟩⟩
+
+def uwff.true : uwff := ↑uatomic_formula.true
+def uwff.false : uwff := ↑uatomic_formula.false
+
+def uwff.free (φ : uwff) := φ.val.free
+
+def uwff.for_all (x : tvariable) (φ : uwff) (h : x ∈ φ.free) : uwff := 
+    ⟨uformula.for_all x φ.val, ⟨h, φ.property⟩⟩
+
+def uwff.exist (x : tvariable) (φ : uwff) (h : x ∈ φ.free) : uwff := 
+    ⟨uformula.exist x φ.val, ⟨h, φ.property⟩⟩
+
+def uwff.rewrite (x : tvariable) (t : uterm) : uwff → uwff
+| ⟨φ, h⟩ := 
+⟨φ.rewrite x t,
+begin
+    -- induction φ.rewrite x t,
+    -- exact true.intro,
+    induction φ,
+    exact true.intro,
+    all_goals {dunfold uformula.rewrite},
+        by_cases c : φ_a = x;
+        simp [c],
+        rw ←c,
+        exact h,
+        refine and.intro _ (φ_ih h.2),
+        cases φ_a_1,
+        try{dunfold uformula.rewrite},
+        
+    
+    
+    -- cases h with h₁ h₂,
+    -- have c := φ_ih h₂,
+    -- obtain c₁ | c₂ : decidable (φ_a = x),
+    --     by apply_instance,
+    -- dunfold uformula.rewrite,
+    -- -- constructor,
+    -- simp [c₁],
+    -- constructor,
+    -- dunfold uformula.free,
+    -- cases 
+      --  logic.deq_tvariable,
+    -- constructor;
+    
+    -- cases h₂ : ψ;
+    -- constructor;
+    
+    -- any_goals {assumption},
+
+end⟩
+
+-- deductive consequence of uwffs: Γ ⊢ φ
+inductive uwff.entails : set uwff → uwff → Prop
+| reflexive (Γ : set uwff) (φ : uwff)(h : φ ∈ Γ) : uwff.entails Γ φ
+| transitivity (Γ Δ : set uwff) (φ : uwff)
+               (h₁ : ∀ ψ ∈ Δ, uwff.entails Γ ψ)
+               (h₂ : uwff.entails Δ φ) :  uwff.entails Γ φ
+| and_intro (φ ψ : uwff) (Γ : set uwff)
+            (h₁ : uwff.entails Γ φ)
+            (h₂ : uwff.entails Γ ψ)
+             : uwff.entails Γ (uwff.and φ ψ)
+| and_elim_left (φ ψ : uwff) (Γ : set uwff)
+            (h : uwff.entails Γ (uwff.and φ ψ))
+             : uwff.entails Γ φ
+| and_elim_right (φ ψ : uwff) (Γ : set uwff)
+            (h : uwff.entails Γ (uwff.and φ ψ))
+             : uwff.entails Γ ψ
+| or_intro_left 
+            (φ ψ : uwff) (Γ : set uwff)
+            (h : uwff.entails Γ φ)
+             : uwff.entails Γ (uwff.or φ ψ)
+| or_intro_right 
+            (φ ψ : uwff) (Γ : set uwff)
+            (h : uwff.entails Γ ψ)
+             : uwff.entails Γ (uwff.or φ ψ)
+| or_elim
+            (φ ψ δ : uwff) (Γ : set uwff)
+            (h₁ : uwff.entails Γ (uwff.or φ ψ))
+            (h₂ : uwff.entails (Γ ∪ {φ}) δ)
+            (h₃ : uwff.entails (Γ ∪ {ψ}) δ)
+             : uwff.entails Γ δ
+| modus_ponens
+            (φ ψ : uwff) (Γ : set uwff)
+            (h₁ : uwff.entails Γ (φ ⇒ ψ))
+            (h₂ : uwff.entails Γ φ)
+             : uwff.entails Γ ψ
+| intro
+            (φ ψ : uwff) (Γ : set uwff)
+            (h : uwff.entails (Γ ∪ {φ}) ψ)
+             : uwff.entails Γ (φ ⇒ ψ)
+| true_intro
+            (Γ : set uwff)
+             : uwff.entails Γ uwff.true
+| for_all_elim
+            (Γ : set uwff) (φ : uwff)
+            (x : tvariable)
+            (free : x ∈ φ.free)
+            (h : uwff.entails Γ (uwff.for_all x φ free))
+            (t : uterm)
+             : uwff.entails Γ uwff.true
+
+
+
+
+
+
+end terms
 end basic
 end logic
