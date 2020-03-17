@@ -127,6 +127,10 @@ begin
     try{apply_instance},
     suffices h : decidable (f_x == f_y ∧ x_v == y_v),
         from @and.decidable _ _ _ h,
+    -- rcases f_x with ⟨f_x, _, _⟩,
+    -- rcases f_y with ⟨f_y, _, _⟩,
+    -- suffices h : decidable (x_v == y_v),
+    --     from @and.decidable _ _ _ h,
     have h : decidable(f_x == f_y) := ( 
         if z : n_x = n_y 
         then by {
