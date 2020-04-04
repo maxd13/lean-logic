@@ -1,4 +1,4 @@
-import formal_system tactic.find --init.data.list
+import data.set.countable tactic.find --init.data.list
 universe u
 
 -- We introduce a much simplified version of
@@ -217,6 +217,10 @@ inductive uformula
 | or : uformula → uformula → uformula
 | if_then : uformula → uformula → uformula
 
+reserve infixr ` ⇒ `:55
+class has_exp (α : Type u) := (exp : α → α → α)
+infixr ⇒ := has_exp.exp
+
 instance uformula.has_exp : has_exp uformula := ⟨uformula.if_then⟩
 @[reducible]
 def uformula.rw : uformula → tvariable → term → uformula
@@ -394,6 +398,107 @@ inductive minimal.entails : set uformula → uformula → Prop
             (eq : minimal.entails Γ (uformula.equation t₁ t₂))
              : minimal.entails Γ (φ.rw x t₂)
 
+-- def minimal.theorem (φ : uformula) := minimal.entails ∅ φ
+
+inductive argument
+| silence {} : argument -- empty argument
+| node : uformula → argument → argument → argument → argument
+
+def argument.assumes (φ : uformula) : argument → Prop
+| argument.silence := false
+| (argument.node ψ argument.silence argument.silence argument.silence) := φ = ψ
+| (argument.node _ a₁ a₂ a₃) := a₁.assumes ∨ 
+                                a₂.assumes ∨ 
+                                a₃.assumes
+
+@[reducible]
+def argument.concludes (φ : uformula) : argument → Prop
+| argument.silence := false
+| (logic.argument.node ψ x y z) := ψ = φ
+
+-- def silence := argument.silence
+-- -- because I said so
+-- def argument.return : uformula → argument
+-- | φ := argument.node φ silence silence silence
+
+-- tells whether an argument is a proof from Γ
+-- TODO: CONVERT THIS TO INDUCTIVE DEFINITION !!!!
+@[reducible]
+def argument.proof_from (Γ : set uformula) : argument → Prop
+| (argument.node φ argument.silence argument.silence argument.silence) := φ ∈ Γ ∨
+                                                                          φ = uformula.true ∨
+                                                                          ∃ t, φ = uformula.equation t t
+-- introduction rules
+| (argument.node (uformula.and φ ψ)
+                       γ₁
+                       γ₂
+                       argument.silence) := γ₁.concludes φ ∧
+                                            γ₂.concludes ψ ∧
+                                            γ₁.proof_from ∧
+                                            γ₂.proof_from
+| (argument.node (uformula.or φ _)
+                       γ₁
+                       argument.silence
+                       argument.silence) := γ₁.concludes φ ∧ γ₁.proof_from
+| (argument.node (uformula.or _ ψ)
+                       argument.silence
+                       γ₂
+                       argument.silence) := γ₂.concludes ψ ∧ γ₂.proof_from
+| (argument.node (uformula.if_then φ ψ)
+                       γ
+                       argument.silence
+                       argument.silence) := γ.concludes ψ ∧
+                                            γ.assumes φ ∧
+                                            γ.proof_from
+| (argument.node (uformula.for_all x φ)
+                       γ
+                       argument.silence
+                       argument.silence) := ∃ c, γ.concludes (φ.rw x $ term.abs c) ∧
+                                            x ∈ φ.free ∧
+                                            γ.proof_from
+| (argument.node (uformula.exist x φ)
+                       γ
+                       argument.silence
+                       argument.silence) := ∃ t, γ.concludes (φ.rw x t) ∧
+                                            t.denotes ∧
+                                            x ∈ φ.free ∧
+                                            γ.proof_from
+-- elimination rules
+| (argument.node φ γ argument.silence argument.silence) := ((∃ ψ, γ.concludes $ uformula.and φ ψ) ∨
+                                                            (∃ ψ, γ.concludes $ uformula.and ψ φ) ∨
+                                                            (∃ x (ψ : uformula) (t : term), 
+                                                             t.denotes ∧
+                                                             x ∈ ψ.free ∧
+                                                             γ.concludes (uformula.for_all x ψ) ∧
+                                                             φ = ψ.rw x t)) ∧
+                                                             γ.proof_from
+| (argument.node φ γ₁ γ₂ argument.silence) := ((∃ ψ, γ₁.concludes (ψ ⇒ φ) ∧
+                                               γ₂.concludes ψ) ∨
+                                              (∃ x (ψ : uformula) c,
+                                               x ∈ ψ.free ∧
+                                               γ₁.concludes (uformula.exist x ψ) ∧
+                                               γ₂.concludes ((ψ.rw x $ term.abs c) ⇒ φ)) ∨
+                                              (∃ x (ψ : uformula) (t₁ t₂ : term), 
+                                               t₁.denotes ∧
+                                               t₂.denotes ∧
+                                               x ∈ ψ.free ∧
+                                               γ₁.concludes (ψ.rw x t₁) ∧
+                                               γ₂.concludes (uformula.equation t₁ t₂) ∧
+                                               φ = ψ.rw x t₂)) ∧
+                                               γ₁.proof_from ∧
+                                               γ₂.proof_from
+| (argument.node φ γ₁ γ₂ γ₃) := ∃ ψ₁ ψ₂, γ₁.concludes (uformula.or ψ₁ ψ₂) ∧
+                                         γ₂.concludes (ψ₁ ⇒ φ) ∧
+                                         γ₃.concludes (ψ₂ ⇒ φ) ∧
+                                         γ₁.proof_from ∧
+                                         γ₂.proof_from ∧
+                                         γ₃.proof_from
+| _ := false
+
+
+def argument.proof_of (φ : uformula) (Γ : set uformula) : argument → Prop
+| γ := γ.proof_from Γ ∧ γ.concludes φ 
+
 variables (Γ : set uformula) (φ : uformula)
 
 theorem self_entailment : minimal.entails Γ (φ ⇒ φ) :=
@@ -497,6 +602,26 @@ begin
     -- case it was proven by identity_elim
         apply minimal.entails.identity_elim Γ h_φ h_x h_xf h_t₁ h_t₂,
         repeat {assumption <|> apply_assumption},
+end
+
+
+theorem proof_entails : (∃ p : argument, p.proof_of φ Γ) → minimal.entails Γ φ :=
+begin
+    intro h,
+    obtain ⟨p, ph₁, ph₂⟩ := h,
+    induction p,
+        have c : false := ph₂,
+        contradiction,
+    have eq : φ = p_a := sorry, 
+        -- impossible to unfold at ph₂ for some reason
+        -- simp [argument.concludes] at ph₂,
+    rw ←eq at ph₁,
+    admit,
+    -- induction φ,
+    
+    -- simp at ph₁,
+
+    
 end
 
 -- theorem tarski_finitary : minimal.entails Γ φ → ∃ S ⊆ Γ, finite S ∧ minimal.entails S φ :=
