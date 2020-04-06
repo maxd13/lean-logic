@@ -1,4 +1,4 @@
-import data.set.countable tactic.find --init.data.list
+import data.set.countable tactic.find tactic.tidy tactic.ring
 universe u
 
 -- We introduce a much simplified version of
@@ -143,6 +143,7 @@ def term.concrete : term → Prop
 
 -- a term in the proper sense of the term (pun intended).
 def pterm := subtype {t : term | t.denotes ∧ t.concrete}
+def pterm.mk (t) (h) : pterm := subtype.mk t h
 def expression := subtype {t : term | t.conotes ∧ t.concrete}
 
 theorem den_rw : ∀ (t₁ t₂ : term) (x : tvariable), t₁.denotes → t₁.rw x t₂ = t₁ :=
@@ -624,111 +625,304 @@ begin
     
 end
 
--- theorem tarski_finitary : minimal.entails Γ φ → ∃ S ⊆ Γ, finite S ∧ minimal.entails S φ :=
--- begin
---     intro h,
---     -- induction on the possible ways in which
---     -- Γ could prove φ
---     induction h,
---     -- case it was proven by reflection
---         replace h_h : {h_φ} ⊆ h_Γ, 
---             intros x elem,
---             simp at elem,
---             rwa ←elem at h_h,
---         existsi {h_φ},
---         existsi h_h,
---         constructor, simp,
---         apply minimal.entails.reflexive {h_φ} h_φ,
---         simp,
---     -- case it was proven by transitivity
---         admit,
---     -- case it was proven by and_intro
---         admit,
---     -- case it was proven by and_elim_left
---         admit,
---     -- case it was proven by and_elim_right
---         admit,
---     -- case it was proven by or_intro_left
---         admit,
---     -- case it was proven by or_intro_right
---         admit,
---     -- case it was proven by or_elim
---         admit,
---     -- case it was proven by modus ponens
---         admit,
---     -- case it was proven by intro
---         admit,
---     -- case it was proven by true_intro
---         admit,
---     -- case it was proven by for_all_intro
---         admit,
---     -- case it was proven by for_all_elim
---         admit,
---     -- case it was proven by exists_intro
---         admit,
---     -- case it was proven by exists_elim
---         admit,
---     -- case it was proven by identity_intro
---         admit,
---     -- case it was proven by identity_elim
---         admit,
--- end
+section semantics
 
--- an attempt to prove transitivity from other rules.
+parameters {α : Type u} [nonempty α]
 
--- theorem transitivity : ∀ (Δ : set uformula)
---                (h₁ : ∀ ψ ∈ Δ, minimal.entails Γ ψ)
---                (h₂ : minimal.entails Δ φ),  minimal.entails Γ φ :=
--- begin
---     intros,
---     -- induction on the possible ways in which
---     -- Δ could prove φ
---     induction h₂,
---     -- case it was proven by reflection
---         apply_assumption,
---         assumption,
---     -- case it was proven by and.intro
---         apply minimal.entails.and_intro,
---         repeat{apply_assumption, assumption},
---     -- case it was proven by and_elim_left
---         apply minimal.entails.and_elim_left h₂_φ h₂_ψ Γ,
---         exact h₂_ih h₁,
---     -- case it was proven by and_elim_right
---         apply minimal.entails.and_elim_right h₂_φ h₂_ψ Γ,
---         exact h₂_ih h₁,
---     -- case it was proven by or_intro_left
---         apply minimal.entails.or_intro_left h₂_φ h₂_ψ Γ,
---         exact h₂_ih h₁,
---     -- case it was proven by or_intro_right
---         apply minimal.entails.or_intro_right h₂_φ h₂_ψ Γ,
---         exact h₂_ih h₁,
---     -- case it was proven by or_elim
---         have c₁ := h₂_ih_h₁ h₁,
---         have c₂ := h₂_ih_h₂ h₁,
---         have c₃ := h₂_ih_h₃ h₁,
---         exact minimal.entails.or_elim h₂_φ h₂_ψ h₂_δ Γ c₁ c₂ c₃,
---     -- case it was proven by modus ponens
---         apply minimal.entails.modus_ponens h₂_φ h₂_ψ Γ,
---         repeat {apply_assumption, assumption},
---     -- case it was proven by intro
---         admit,
---     -- case it was proven by true_intro
---         exact minimal.entails.true_intro Γ,
---     -- case it was proven by for_all_intro
---         admit,
---     -- case it was proven by for_all_elim
---         admit,
---     -- case it was proven by exists_intro
---         admit,
---     -- case it was proven by exists_elim
---         admit,
---     -- case it was proven by identity_intro
---         admit,
---     -- case it was proven by identity_elim
---         admit,
--- end
+-- functional interpretation
+def fint  {n : ℕ} := nary n → vector α n → α
+-- relational interpretation
+def rint {n : ℕ} := nrary n → vector α n → Prop
+-- variable assignment
+def vasgn := tvariable → α
+
+structure model :=
+    (I₁ : Π {n}, @fint n)
+    (I₂ : Π {n}, @rint n)
+
+def remove_none_list {α} : list (option α) → option (list α)
+| [] := some []
+| (some x::xs) := remove_none_list xs >>= λ ls, some $ x::ls
+| (none::_) := none
+
+private lemma remove_none_aux {α} : ∀ (ls : list $ option α) n, 
+                                    ls.length = n →
+                                    ∀ xs, remove_none_list ls = some xs →
+                                    xs.length = n :=
+begin
+    intros ls n h₁ xs h₂,
+    induction ls generalizing n xs,
+        simp at h₁,
+        simp [remove_none_list] at h₂,
+        rw [←h₂, ←h₁],
+        simp,
+    induction ls_hd;
+        simp [remove_none_list] at h₂,
+        contradiction,
+    obtain ⟨tl, c₁, c₂⟩ := h₂,
+    rw ←c₂, simp,
+    simp at h₁,
+    ring at h₁,
+    rw ←h₁,
+    ring, simp,
+    replace h₁ : length ls_tl = n - 1,
+        rw ←h₁,
+        simp,
+    have c := ls_ih (n-1) tl h₁ c₁,
+    rwa h₁,
+end
+
+def remove_none {α} {n} : vector (option α) n → option (vector α n)
+| ⟨ls, p⟩ := begin
+                cases h : remove_none_list ls with xs,
+                    exact none,
+                have c := remove_none_aux ls n p xs h,
+                exact some ⟨xs, c⟩
+            end
+    
+def model.reference (M : model) : term → option α
+-- | ⟨(term.var x), p⟩ := begin
+--                         have c : logic.term.vars (term.var x) = ∅ 
+--                             := p.1,
+--                         simp at c,
+--                         contradiction,
+--                         end
+-- | ⟨(term.abs c), p⟩ := begin
+--                         have c : false := p.2,
+--                         contradiction,
+--                         end
+| (@term.app _ _ _ _ _ _ _ 0 f _) := some $ model.I₁ M f ⟨[], rfl⟩
+| (@term.app _ _ _ _ _ _ _ (n+1) f v) := let v₂ := λ k, model.reference (v k),
+                                             v₃ := remove_none $ vector.of_fn v₂
+                                         in do 
+                                         v₄ <- v₃,
+                                         some $
+                                         model.I₁ M f v₄
+| _ := none
+
+def model.reference' (M : model) : term → vasgn → option α
+| (term.var x) asg := some $ asg x
+| (@term.app _ _ _ _ _ _ _ 0 f _) _ := model.I₁ M f ⟨[], rfl⟩
+| (@term.app _ _ _ _ _ _ _ (n+1) f v) asg := let v₂ := λ k, model.reference' (v k) asg,
+                                                 v₃ := remove_none $ vector.of_fn v₂
+                                             in do 
+                                             v₄ <- v₃,
+                                             some $
+                                             model.I₁ M f v₄
+| _ _ := none
+                                         
+                                                   
+
+-- let v₂ := (λ k,
+--             let den : term.denotes (v k) ∧ term.concrete (v k):=
+--                 begin
+--                     constructor,
+--                         have c : logic.term.vars (term.app f v) = ∅ := p.1,
+--                         replace c : (let v₂ := λ m, logic.term.vars (v m) in ⋃ m, v₂ m) = ∅ := c,
+--                         simp at c,
+--                         ext, constructor,
+--                             intro h,
+--                             have d : x ∈ (⋃ (m : fin (n + 1)), logic.term.vars (v m)),
+--                                 simp,
+--                                 exact ⟨k, h⟩,
+--                             rwa c at d,
+--                         simp,
+--                     have c := p.2,
+--                     exact c k,
+--                 end
+--             in pterm.mk (v k) den),
+
+-- TODO prove that the reference is defined for pterms
+-- use commented code above for help
+
+-- for some reason I cant use do notation with
+-- the option types, because lean is unable to
+-- synthesize the types
+def model.satisfies' : model → uformula → vasgn → option Prop
+| M (uformula.relational r v) asg := 
+    match remove_none $
+          vector.map (flip M.reference' asg) 
+          (vector.of_fn v)
+          with
+          | none := none
+          | some xs := some $ M.I₂ r xs
+    end                         
+| M (uformula.equation t₁ t₂) asg :=
+    -- got ugly because 
+    -- both do and >>= are causing problems
+    match model.reference' M t₁ asg with
+    | none := none
+    | some x := match model.reference' M t₂ asg with
+                | none := none
+                | some y := some (x = y)
+                end
+    end
+| M uformula.true _ := some true
+| M uformula.false _ := some false
+| M (uformula.for_all x φ) asg := some
+    (∀ (a : α) (ass : vasgn),
+    ass x = a →
+    (∀ y, y ≠ x → ass y = asg y) →
+    ∃ p : Prop, p ∧
+    M.satisfies' φ ass = some p)
+| M (uformula.exist x φ) asg := some
+    (∃ (a : α),
+    ∀ (ass : vasgn),
+    ass x = a →
+    (∀ y, y ≠ x → ass y = asg y) →
+    ∃ p : Prop, p ∧
+    M.satisfies' φ ass = some p)
+| M (uformula.and φ ψ) asg :=
+    match model.satisfies' M φ asg with
+    | none := none
+    | some x := match model.satisfies' M ψ asg with
+                | none := none
+                | some y := some (x ∧ y)
+                end
+    end
+
+| M (uformula.or φ ψ) asg := 
+    match model.satisfies' M φ asg with
+    | none := none
+    | some x := match model.satisfies' M ψ asg with
+                | none := none
+                | some y := some (x ∨ y)
+                end
+    end
+| M (uformula.if_then φ ψ) asg :=
+    match model.satisfies' M φ asg with
+    | none := none
+    | some x := match model.satisfies' M ψ asg with
+                | none := none
+                | some y := some (x → y)
+                end
+    end
+-- @[reducible]
+def model.satisfies : model → uformula → Prop
+| M φ := 
+    ∀ (ass : vasgn),
+    ∃ p : Prop, p ∧
+    M.satisfies' φ ass = some p
+
+local infixr `⊨₁`:55 := model.satisfies
+local infixr `⊢`:55 := minimal.entails
+
+lemma false_is_unsat : ¬∃ M : model, M ⊨₁ uformula.false :=
+begin
+    intro h,
+    obtain ⟨M, h⟩ := h,
+    apply nonempty.elim _inst_4, intro x,
+    obtain ⟨p, hp, sat⟩ := h (λ y : tvariable, x),
+    replace sat : some false = some p := sat,
+    simp at sat,
+    contradiction,
+end
+
+def model.for : model → set uformula → Prop
+| M Γ := ∀ φ ∈ Γ, M ⊨₁ φ
+
+-- semantic consequence
+-- remember Γ and φ are already defined
+def theory.follows : Prop :=
+    ∀ M : model, M.for Γ → M ⊨₁ φ
+
+local infixr `⊨`:55 := theory.follows
+
+-- so pretty.
+theorem soundness : Γ ⊢ φ → Γ ⊨ φ :=
+begin
+    intros entails M h ass,
+    induction entails generalizing ass,
+    -- case reflexive
+    have c : M.satisfies entails_φ := h entails_φ entails_h,
+    obtain ⟨p, hp, sat⟩ := c ass,
+    existsi p,
+    constructor,
+        exact hp,
+    assumption,
+    -- case transitivity
+    apply entails_ih_h₂,
+    intros ψ H asg,
+    have c := entails_ih_h₁ ψ H h,
+    exact c asg,
+    -- case and.intro
+    obtain ⟨p₁, hp₁, sat₁⟩ := entails_ih_h₁ h ass,
+    obtain ⟨p₂, hp₂, sat₂⟩ := entails_ih_h₂ h ass,
+    existsi p₁ ∧ p₂,
+    constructor,
+        exact ⟨hp₁, hp₂⟩,
+    dunfold model.satisfies',
+    simp [sat₁, sat₂],
+    dunfold model.satisfies'._match_4,
+    dunfold model.satisfies'._match_5,
+    refl,
+    -- case and.elim_left
+    obtain ⟨p, hp, sat⟩ := entails_ih h ass,
+    revert sat,
+    dunfold model.satisfies',
+    intro sat,
+    cases (M.satisfies' entails_ψ ass),
+        cases (M.satisfies' entails_φ ass);
+            replace sat : none = some p := sat;
+            simp at sat;
+            contradiction,
+    cases (M.satisfies' entails_φ ass);
+        revert sat;
+        dunfold model.satisfies'._match_4,
+        contradiction,
+    dunfold model.satisfies'._match_5,
+    intro sat,
+    simp at sat,
+    existsi val_1,
+    constructor,
+        exact (sat.2 hp).1,
+    refl,
+    -- case and.elim_right
+    obtain ⟨p, hp, sat⟩ := entails_ih h ass,
+    revert sat,
+    dunfold model.satisfies',
+    intro sat,
+    cases (M.satisfies' entails_ψ ass),
+        cases (M.satisfies' entails_φ ass);
+            replace sat : none = some p := sat;
+            simp at sat;
+            contradiction,
+    cases (M.satisfies' entails_φ ass);
+        revert sat;
+        dunfold model.satisfies'._match_4,
+        contradiction,
+    dunfold model.satisfies'._match_5,
+    intro sat,
+    simp at sat,
+    existsi val,
+    constructor,
+        exact (sat.2 hp).2,
+    refl,
+    -- case or_intro_left
+    obtain ⟨p, hp, sat⟩ := entails_ih h ass,
+    dunfold model.satisfies',
+    -- cases (M.satisfies' entails_ψ ass),
+    cases (M.satisfies' entails_φ ass),
+        simp at sat,
+        contradiction,
+    simp at sat,
+    dunfold model.satisfies'._match_6,
+    -- dunfold model.satisfies'._match_7,
+    cases (M.satisfies' entails_φ ass);
+        revert sat;
+        dunfold model.satisfies'._match_6,
+        contradiction,
+    dunfold model.satisfies'._match_7,
 
 
+end
+
+
+
+end semantics
+
+section consistency
+end consistency
 
 end formulas
 end logic
