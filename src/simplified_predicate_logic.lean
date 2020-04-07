@@ -634,15 +634,22 @@ def fint  {n : ℕ} := nary n → vector α n → α
 -- relational interpretation
 def rint {n : ℕ} := nrary n → vector α n → Prop
 -- variable assignment
-def vasgn := tvariable → α
+def vasgn := subtype {asg : tvariable → α | ∀ x, asg x ≠ default α}
+
+parameter exists_ass : nonempty vasgn
 
 structure model :=
     (I₁ : Π {n}, @fint n)
+    -- required because any constant that would map
+    -- to the default value, would be a "generic point"
+    -- of the type α, i.e. any of its properties would be
+    -- true of any instance of α.
+    (constant_no_default : ∀ f : nary 0, I₁ f vector.nil ≠ default α)
     (I₂ : Π {n}, @rint n)
 
 -- @[reducible]
 def model.reference' (M : model) : term → vasgn → α
-| (term.var x) asg := asg x
+| (term.var x) asg := asg.val x
 | (@term.app _ _ _ _ _ _ _ 0 f _) _ := model.I₁ M f ⟨[], rfl⟩
 | (@term.app _ _ _ _ _ _ _ (n+1) f v) asg := let v₂ := λ k, model.reference' (v k) asg,
                                                  v₃ := vector.of_fn v₂
@@ -656,8 +663,8 @@ def model.reference' (M : model) : term → vasgn → α
 -- If the default value is considered to be
 -- a non-existent reference, like an option.none,
 -- then this reference is only defined for pterms.
-def model.reference (M : model) : pterm → α
-| t := M.reference' t.val (λx, default α)
+-- def model.reference (M : model) : pterm → α
+-- | t := M.reference' t.val (λx, default α)
 
 def model.satisfies' : model → uformula → vasgn → Prop
 | M (uformula.relational r v) asg := 
@@ -672,14 +679,14 @@ def model.satisfies' : model → uformula → vasgn → Prop
 | M uformula.false _ := false
 | M (uformula.for_all x φ) asg :=
     ∀ (a : α) (ass : vasgn),
-    ass x = a →
-    (∀ y, y ≠ x → ass y = asg y) →
+    ass.val x = a →
+    (∀ y, y ≠ x → ass.val y = asg.val y) →
     M.satisfies' φ ass
 | M (uformula.exist x φ) asg :=
     ∃ (a : α),
     ∀ (ass : vasgn),
-    ass x = a →
-    (∀ y, y ≠ x → ass y = asg y) →
+    ass.val x = a →
+    (∀ y, y ≠ x → ass.val y = asg.val y) →
     M.satisfies' φ ass
 | M (uformula.and φ ψ) asg :=
     let x := model.satisfies' M φ asg,
@@ -702,12 +709,16 @@ def model.satisfies : model → uformula → Prop
 local infixr `⊨₁`:55 := model.satisfies
 local infixr `⊢`:55 := minimal.entails
 
+include exists_ass
 lemma false_is_unsat : ¬∃ M : model, M ⊨₁ uformula.false :=
 begin
     intro h,
     obtain ⟨M, h⟩ := h,
-    exact h (λ y : tvariable, default α),
+    tactic.unfreeze_local_instances,
+    obtain ⟨x⟩ := exists_ass,
+    exact h x,
 end
+omit exists_ass
 
 def model.for : model → set uformula → Prop
 | M Γ := ∀ φ ∈ Γ, M ⊨₁ φ
@@ -766,9 +777,27 @@ begin
         exact c₂ c₁,
     exact c₃ c₁,
     -- case modus ponens
-    admit,
+    have c₁ := entails_ih_h₁ h ass,
+    have c₂ := entails_ih_h₂ h ass,
+    revert c₁,
+    dunfold model.satisfies',
+    simp,
+    intro c₁,
+    exact c₁ c₂,
     -- case intro
     admit,
+    -- revert M,
+    -- intro h₂,
+    -- have c : M.for (entails_Γ ∪ {entails_φ}),
+    --     intros φ H,
+    --     cases H,
+    --         revert φ,
+    --         exact h,
+    --     simp at H,
+    --     rw H,
+        -- revert h₂,
+        -- intro asg,
+
     -- case true.intro
     trivial,
     -- case universal intro
