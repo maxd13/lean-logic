@@ -726,50 +726,48 @@ def model.for : model → set uformula → Prop
 -- semantic consequence
 -- remember Γ and φ are already defined
 def theory.follows : Prop :=
-    ∀ M : model, M.for Γ → M ⊨₁ φ
+    ∀ (M : model) ass, (∀ ψ ∈ Γ, M.satisfies' ψ ass) → M.satisfies' φ ass
 
 local infixr `⊨`:55 := theory.follows
 
 -- So pretty.
 theorem soundness : Γ ⊢ φ → Γ ⊨ φ :=
 begin
-    intros entails M h ass,
-    induction entails generalizing ass,
+    intros entails M ass h,
+    induction entails,
     -- case reflexive
-    have c : M.satisfies entails_φ := h entails_φ entails_h,
-    exact c ass,
+    exact h entails_φ entails_h,
     -- case transitivity
     apply entails_ih_h₂,
-    intros ψ H asg,
-    have c := entails_ih_h₁ ψ H h,
-    exact c asg,
+    intros ψ H,
+    exact entails_ih_h₁ ψ H h,
     -- case and.intro
-    have c₁ := entails_ih_h₁ h ass,
-    have c₂ := entails_ih_h₂ h ass,
+    have c₁ := entails_ih_h₁ h,
+    have c₂ := entails_ih_h₂ h,
     exact ⟨c₁, c₂⟩,
     -- case and.elim_left
-    have sat := entails_ih h ass,
+    have sat := entails_ih h,
     revert sat,
     dunfold model.satisfies',
     simp,
     intros sat aux,
     exact sat,
     -- case and.elim_right
-    have sat := entails_ih h ass,
+    have sat := entails_ih h,
     revert sat,
     repeat {dunfold model.satisfies', simp},
     left,
-    exact entails_ih h ass,
+    exact entails_ih h,
     right,
-    exact entails_ih h ass,
+    exact entails_ih h,
     -- case or_intro_left
     -- already solved
     -- case or_intro_right
     -- already solved
     -- case or_elim
-    have c₁ := entails_ih_h₁ h ass,
-    have c₂ := entails_ih_h₂ h ass,
-    have c₃ := entails_ih_h₃ h ass,
+    have c₁ := entails_ih_h₁ h,
+    have c₂ := entails_ih_h₂ h,
+    have c₃ := entails_ih_h₃ h,
     tactic.unfreeze_local_instances,
     dunfold model.satisfies' at *,
     simp at *,
@@ -777,27 +775,22 @@ begin
         exact c₂ c₁,
     exact c₃ c₁,
     -- case modus ponens
-    have c₁ := entails_ih_h₁ h ass,
-    have c₂ := entails_ih_h₂ h ass,
+    have c₁ := entails_ih_h₁ h,
+    have c₂ := entails_ih_h₂ h,
     revert c₁,
     dunfold model.satisfies',
     simp,
     intro c₁,
     exact c₁ c₂,
     -- case intro
-    admit,
-    -- revert M,
-    -- intro h₂,
-    -- have c : M.for (entails_Γ ∪ {entails_φ}),
-    --     intros φ H,
-    --     cases H,
-    --         revert φ,
-    --         exact h,
-    --     simp at H,
-    --     rw H,
-        -- revert h₂,
-        -- intro asg,
-
+    intro h₂,
+    have sat := entails_ih,
+    apply sat,
+    intros ψ H,
+    cases H,
+    exact h ψ H,
+    simp at H,
+    rwa H,
     -- case true.intro
     trivial,
     -- case universal intro
