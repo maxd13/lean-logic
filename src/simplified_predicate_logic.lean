@@ -42,6 +42,8 @@ inductive term
 def const.term : const → term
 | c := term.app c fin_zero_elim
 
+
+
 @[reducible]
 def term.rw : term → tvariable → term → term
 | (term.var a) x t := if x = a then t else term.var a
@@ -630,11 +632,11 @@ section semantics
 parameters {α : Type u} [inhabited α]
 
 -- functional interpretation
-def fint  {n : ℕ} := nary n → vector α n → α
+def fint  {n : ℕ} := nary n → (fin n → α) → α
 -- relational interpretation
-def rint {n : ℕ} := nrary n → vector α n → Prop
+def rint {n : ℕ} := nrary n → (fin n → α) → Prop
 -- variable assignment
-def vasgn := subtype {asg : tvariable → α | ∀ x, asg x ≠ default α}
+def vasgn := tvariable → α
 
 parameter exists_ass : nonempty vasgn
 
@@ -644,16 +646,15 @@ structure model :=
     -- to the default value, would be a "generic point"
     -- of the type α, i.e. any of its properties would be
     -- true of any instance of α.
-    (constant_no_default : ∀ f : nary 0, I₁ f vector.nil ≠ default α)
+    (constant_no_default : ∀ f : nary 0, I₁ f fin_zero_elim ≠ default α)
     (I₂ : Π {n}, @rint n)
 
 -- @[reducible]
 def model.reference' (M : model) : term → vasgn → α
-| (term.var x) asg := asg.val x
-| (@term.app _ _ _ _ _ _ _ 0 f _) _ := model.I₁ M f ⟨[], rfl⟩
-| (@term.app _ _ _ _ _ _ _ (n+1) f v) asg := let v₂ := λ k, model.reference' (v k) asg,
-                                                 v₃ := vector.of_fn v₂
-                                             in model.I₁ M f v₃
+| (term.var x) asg := asg x
+| (@term.app _ _ _ _ _ _ _ 0 f _) _ := model.I₁ M f fin_zero_elim
+| (@term.app _ _ _ _ _ _ _ (n+1) f v) asg := let v₂ := λ k, model.reference' (v k) asg
+                                             in model.I₁ M f v₂
 -- An unavoidable trick.
 -- It is just ridiculously hard to try any other
 -- alternative. I gained A LOT of productivity
@@ -663,14 +664,27 @@ def model.reference' (M : model) : term → vasgn → α
 -- If the default value is considered to be
 -- a non-existent reference, like an option.none,
 -- then this reference is only defined for pterms.
--- def model.reference (M : model) : pterm → α
+def model.reference (M : model) : pterm → α
+| ⟨(@term.app _ _ _ _ _ _ _ 0 f _),_⟩ := model.I₁ M f fin_zero_elim
+| ⟨(@term.app _ _ _ _ _ _ _ (n+1) f v),p⟩ := let v₂ := λ k, model.reference ⟨v k,
+                                            begin
+                                                admit,
+                                            end⟩
+                                             in model.I₁ M f v₂
+| _ := sorry
 -- | t := M.reference' t.val (λx, default α)
+using_well_founded well_founded_tactics.default
+-- begin
+--     constructor,
+--     intros x y,
+--     exact `[exact well_founded_tactics.cancel_nat_add_lt],
+--     exact assumption,
+-- end
+
 
 def model.satisfies' : model → uformula → vasgn → Prop
 | M (uformula.relational r v) asg := 
-          M.I₂ r $
-          vector.map (flip M.reference' asg) 
-          (vector.of_fn v)
+          M.I₂ r $ λm,  M.reference' (v m) asg
 | M (uformula.equation t₁ t₂) asg :=
     let x := model.reference' M t₁ asg,
         y := model.reference' M t₂ asg
@@ -679,14 +693,14 @@ def model.satisfies' : model → uformula → vasgn → Prop
 | M uformula.false _ := false
 | M (uformula.for_all x φ) asg :=
     ∀ (a : α) (ass : vasgn),
-    ass.val x = a →
-    (∀ y, y ≠ x → ass.val y = asg.val y) →
+    ass x = a →
+    (∀ y, y ≠ x → ass y = asg y) →
     M.satisfies' φ ass
 | M (uformula.exist x φ) asg :=
     ∃ (a : α),
     ∀ (ass : vasgn),
-    ass.val x = a →
-    (∀ y, y ≠ x → ass.val y = asg.val y) →
+    ass x = a →
+    (∀ y, y ≠ x → ass y = asg y) →
     M.satisfies' φ ass
 | M (uformula.and φ ψ) asg :=
     let x := model.satisfies' M φ asg,
@@ -729,6 +743,63 @@ def theory.follows : Prop :=
     ∀ (M : model) ass, (∀ ψ ∈ Γ, M.satisfies' ψ ass) → M.satisfies' φ ass
 
 local infixr `⊨`:55 := theory.follows
+
+
+def vasgn.bind (ass : vasgn) (x : tvariable) (val : α) : vasgn :=
+    λy, if y = x then val else ass y
+
+-- lemma uformula.rw.semantics (φ : uformula) 
+--                             (x : tvariable)
+--                             (h₀ : x ∈ φ.free)
+--                             (ass : vasgn)
+--                             (M : model)
+--                             (t : pterm)
+--                             : 
+--                             M.satisfies' φ ass →
+--                             M.satisfies' (φ.rw x t.val)
+--                             (ass.bind x (M.reference' t.val ass))
+--                             :=
+-- begin
+--     -- intro h,
+--     induction φ;
+--     dunfold uformula.rw; try{simp};
+--     dunfold model.satisfies';
+--     intro h,
+--     -- have c₁ : (λ (m : fin φ_n), M.reference' (φ_v m) ass) = (flip M.reference' ass) ∘ φ_v,
+--     --     dsimp [flip, function.comp],
+--     --     refl,
+--     have c : ∀ m, (M.reference' ((φ_v m).rw x t.val) (ass.bind x (M.reference' t.val ass))) = M.reference' (φ_v m) ass,
+--         focus {
+--             intro m,
+--             induction (φ_v m);
+--             dunfold term.rw;
+--             dunfold vasgn.bind,
+--             dunfold model.reference',
+--             by_cases h₂ : x = a;
+--                 simp [h₂],
+--                 obtain ⟨t, pt₁, pt₂⟩ := t,
+--                 induction t,
+--                     dunfold model.reference',
+--                     simp,
+                
+--                 revert pt₁,
+--                 dunfold term.denotes,
+--                 dunfold term.vars,
+--                 simp,
+--                     revert pt₂,
+--                     dunfold term.concrete,
+--                     contradiction,
+--                 simp,
+--                 induction t_n;
+--                 dunfold model.reference',
+                
+--                     -- dunfold model.reference',
+
+--         }
+
+            
+
+-- end
 
 -- So pretty.
 theorem soundness : Γ ⊢ φ → Γ ⊨ φ :=
@@ -794,10 +865,35 @@ begin
     -- case true.intro
     trivial,
     -- case universal intro
+    -- intros x asg h₁ h₂,
+    -- have sat := entails_ih h,
+    -- focus {
+    --     induction entails_φ;
+    --     revert sat;
+    --     dunfold uformula.rw;
+    --     dunfold model.satisfies';
+    --     try{dunfold flip};
+    --     try{dunfold vector.of_fn};
+    --     try{dunfold vector.map},
+    --         intro sat,
+    -- },
     admit,
     -- case universal elim
+    -- focus {
+    --     induction entails_φ;
+    --     have sat := entails_ih h;
+    --     revert sat;
+    --     dunfold uformula.rw; try{simp},
+    --     -- I cant go any further applying strategies to
+    --     -- all goals because the linter gets very slow.
+    --     dunfold model.satisfies', try{simp},
+    --         intro sat,
+    -- },
     admit,
     -- case exists intro
+    have sat := entails_ih h,
+    existsi M.reference' entails_t ass,
+    intros asg h₁ h₂,
     admit,
     -- case exists elim
     admit,
