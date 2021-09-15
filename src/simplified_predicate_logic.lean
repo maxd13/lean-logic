@@ -20,7 +20,7 @@ parameter {relational_symbol : Type u}
 parameters {tvariable : Type u} [decidable_eq tvariable]
 parameter {var_ne : nonempty tvariable}
 -- parameters {var_index : ℕ → tvariable} {inj : function.injective var_index}
-parameters {abstract_var : Type u} [decidable_eq abstract_var]
+-- parameters {abstract_var : Type u} [decidable_eq abstract_var]
 -- parameter {abs_ne : nonempty abstract_var}
 parameter {arity : functional_symbol -> ℕ}
 parameter {rarity : relational_symbol -> ℕ}
@@ -35,11 +35,11 @@ def const := nary 0
 -- terms in the language
 inductive term
 | var : tvariable → term
-| abs : abstract_var → term
+-- | abs : abstract_var → term
 | app  {n : ℕ} (f : nary n) (v : fin n → term) :  term
 
 -- constant terms.
-def const.term : const → term
+def nary.term : const → term
 | c := term.app c fin_zero_elim
 
 
@@ -50,15 +50,23 @@ def term.rw : term → tvariable → term → term
 | (term.app f v) x t := 
     let v₂ := λ m, term.rw (v m) x t in
     term.app f v₂
-| t _ _ := t
+-- | t _ _ := t
 
--- abstract rewrite
-def term.arw : term → abstract_var → term → term
-| (term.abs a) x t := if x = a then t else term.abs a
-| (term.app f v) x t := 
-    let v₂ := λ m, term.arw (v m) x t in
+def term.rw_const : term → const → tvariable → term
+| (@term.app _ _ _ _ _ 0 f _) c x := if f = c then term.var x else f.term
+| (@term.app _ _ _ _ _ (n+1) f v) c x := 
+    let v₂ := λ m, term.rw_const (v m) c x in
     term.app f v₂
 | t _ _ := t
+
+
+-- abstract rewrite
+-- def term.arw : term → abstract_var → term → term
+-- | (term.abs a) x t := if x = a then t else term.abs a
+-- | (term.app f v) x t := 
+--     let v₂ := λ m, term.arw (v m) x t in
+--     term.app f v₂
+-- | t _ _ := t
 
 -- Syntatical equality. 
 -- This is a trick to bypass the need to prove decidable_eq term
@@ -97,7 +105,7 @@ def term.vars : term → set tvariable
 | (term.app f v) :=
     let v₂ := λ m, term.vars (v m) in
     ⋃ m, v₂ m
-| _ := ∅
+-- | _ := ∅
 
 -- theorem hidden_variables : ∀ t : term, ∃ x : tvariable, x ∉ t.vars :=
 -- let i := var_index,
@@ -112,6 +120,7 @@ def term.vars : term → set tvariable
 --         by_cases indexed,
 --             obtain ⟨n, np⟩ := h,
 --             existsi i (n + 1),
+--             dunfold term.vars,
 --             simp,
 --             intro h,
 --             rw [←np] at h,
@@ -119,34 +128,46 @@ def term.vars : term → set tvariable
 --             have c₀ : n + 1 ≠ n := nat.succ_ne_self n,
 --             contradiction,
 --         existsi i 0,
+--         dunfold term.vars,
 --         simp,
 --         intro h₂,
 --         apply h,
 --         exact ⟨0, h₂⟩,
---     -- case t is an abstract variable
---         simp,
---         exact ⟨i 0, true.intro⟩,
 --     -- case t is a function application
+--         dunfold term.vars,
 --         simp,
 --         classical,
 --         by_contradiction h,
 --         replace h := not_exists.mp h,
 --         -- replace h := not_forall.mp h,
+--         induction t_n,
+--             replace h := h (i 0),
+--             revert _inst,
+--             have c : ∀ (x : fin 0), i 0 ∉ (t_v x).vars,
+--                 intro x,
+--                 apply fin_zero_elim x,
+--             contradiction,
+--         replace h := h (i $ t_n_n + 1),
+--         replace h := not_forall.mp h,
+--         obtain ⟨x, c₁⟩ := h,
+--         simp at c₁,
+--         replace t_ih := t_ih x,
+        
 -- end
 
 @[reducible]
 def term.denotes (t : term) := t.vars = ∅
 @[reducible]
 def term.conotes (t : term) := ¬ t.denotes
-def term.concrete : term → Prop
-| (term.var a) := true
-| (term.abs a) := false
-| (term.app f v) := ∀ m, term.concrete (v m)
+-- def term.concrete : term → Prop
+-- | (term.var a) := true
+-- | (term.abs a) := false
+-- | (term.app f v) := ∀ m, term.concrete (v m)
 
 -- a term in the proper sense of the term (pun intended).
-def pterm := subtype {t : term | t.denotes ∧ t.concrete}
-def expression := subtype {t : term | t.conotes ∧ t.concrete}
-def cterm := subtype term.concrete
+def pterm := subtype {t : term | t.denotes}-- ∧ t.concrete}
+def expression := subtype {t : term | t.conotes}-- ∧ t.concrete}
+-- def cterm := subtype term.concrete
 
 theorem den_rw : ∀ (t₁ t₂ : term) (x : tvariable), t₁.denotes → t₁.rw x t₂ = t₁ :=
 begin
@@ -158,7 +179,7 @@ begin
         simp at den₁, 
         contradiction,
     -- case abs_var 
-        simp,
+        -- simp,
     -- case app
         replace den₁ : (term.app t₁_f t₁_v).vars = ∅ := den₁,
         let v₂ := λ m, (t₁_v m).vars,
@@ -245,20 +266,20 @@ def uformula.rw : uformula → tvariable → term → uformula
 | (uformula.if_then φ ψ) x t := uformula.if_then (φ.rw x t) (ψ.rw x t)
 | φ _ _ := φ
 
-def uformula.arw : uformula → abstract_var → term → uformula
-| (uformula.relational r v) x t :=
-    let v₂ := λ m, (v m).arw x t in
-    uformula.relational r v₂
-| (uformula.equation t₁ t₂) x t :=
-    let t₃ := t₁.arw x t,
-        t₄ := t₂.arw x t
-    in uformula.equation t₃ t₄
-| (uformula.for_all y φ) x t := uformula.for_all y (φ.arw x t)
-| (uformula.exist y φ) x t   := uformula.exist y (φ.arw x t)
-| (uformula.and φ ψ) x t     := uformula.and (φ.arw x t) (ψ.arw x t)
-| (uformula.or φ ψ)  x t     := uformula.or (φ.arw x t) (ψ.arw x t)
-| (uformula.if_then φ ψ) x t := uformula.if_then (φ.arw x t) (ψ.arw x t)
-| φ _ _ := φ
+-- def uformula.arw : uformula → abstract_var → term → uformula
+-- | (uformula.relational r v) x t :=
+--     let v₂ := λ m, (v m).arw x t in
+--     uformula.relational r v₂
+-- | (uformula.equation t₁ t₂) x t :=
+--     let t₃ := t₁.arw x t,
+--         t₄ := t₂.arw x t
+--     in uformula.equation t₃ t₄
+-- | (uformula.for_all y φ) x t := uformula.for_all y (φ.arw x t)
+-- | (uformula.exist y φ) x t   := uformula.exist y (φ.arw x t)
+-- | (uformula.and φ ψ) x t     := uformula.and (φ.arw x t) (ψ.arw x t)
+-- | (uformula.or φ ψ)  x t     := uformula.or (φ.arw x t) (ψ.arw x t)
+-- | (uformula.if_then φ ψ) x t := uformula.if_then (φ.arw x t) (ψ.arw x t)
+-- | φ _ _ := φ
 
 -- def uformula.rwt : uformula → term → term → uformula
 -- | (uformula.relational r v) x t :=
@@ -368,8 +389,8 @@ inductive minimal.entails : set uformula → uformula → Prop
 | for_all_intro
             (Γ : set uformula) (φ : uformula)
             (x : tvariable) (xf : x ∈ φ.free)
-            (c : abstract_var)
-            (h : minimal.entails Γ (φ.rw x $ term.abs c))
+            (c : const) (abs : c.term.abstract_in Γ)
+            (h : minimal.entails Γ (φ.rw x c.term))
              : minimal.entails Γ (uformula.for_all x φ)
 | for_all_elim
             (Γ : set uformula) (φ : uformula)
@@ -386,9 +407,10 @@ inductive minimal.entails : set uformula → uformula → Prop
 | exists_elim 
             (Γ : set uformula) (φ ψ : uformula)
             (x : tvariable) (xf : x ∈ φ.free)
-            (c : abstract_var)
+            (c : const) (abs : c.term.abstract_in Γ)
+            (abs_φ : c.term ∉ φ.terms) (abs_ψ : c.term ∉ ψ.terms)
             (h₁ : minimal.entails Γ (uformula.exist x φ))
-            (h₂ : minimal.entails Γ ((φ.rw x $ term.abs c) ⇒ ψ))
+            (h₂ : minimal.entails Γ ((φ.rw x c.term) ⇒ ψ))
              : minimal.entails Γ ψ
 | identity_intro
             (Γ : set uformula) (t : term)
@@ -426,81 +448,81 @@ def argument.concludes (φ : uformula) : argument → Prop
 
 -- tells whether an argument is a proof from Γ
 -- TODO: CONVERT THIS TO INDUCTIVE DEFINITION !!!!
-@[reducible]
-def argument.proof_from (Γ : set uformula) : argument → Prop
-| (argument.node φ argument.silence argument.silence argument.silence) := φ ∈ Γ ∨
-                                                                          φ = uformula.true ∨
-                                                                          ∃ t, φ = uformula.equation t t
--- introduction rules
-| (argument.node (uformula.and φ ψ)
-                       γ₁
-                       γ₂
-                       argument.silence) := γ₁.concludes φ ∧
-                                            γ₂.concludes ψ ∧
-                                            γ₁.proof_from ∧
-                                            γ₂.proof_from
-| (argument.node (uformula.or φ _)
-                       γ₁
-                       argument.silence
-                       argument.silence) := γ₁.concludes φ ∧ γ₁.proof_from
-| (argument.node (uformula.or _ ψ)
-                       argument.silence
-                       γ₂
-                       argument.silence) := γ₂.concludes ψ ∧ γ₂.proof_from
-| (argument.node (uformula.if_then φ ψ)
-                       γ
-                       argument.silence
-                       argument.silence) := γ.concludes ψ ∧
-                                            γ.assumes φ ∧
-                                            γ.proof_from
-| (argument.node (uformula.for_all x φ)
-                       γ
-                       argument.silence
-                       argument.silence) := ∃ c, γ.concludes (φ.rw x $ term.abs c) ∧
-                                            x ∈ φ.free ∧
-                                            γ.proof_from
-| (argument.node (uformula.exist x φ)
-                       γ
-                       argument.silence
-                       argument.silence) := ∃ t, γ.concludes (φ.rw x t) ∧
-                                            t.denotes ∧
-                                            x ∈ φ.free ∧
-                                            γ.proof_from
--- elimination rules
-| (argument.node φ γ argument.silence argument.silence) := ((∃ ψ, γ.concludes $ uformula.and φ ψ) ∨
-                                                            (∃ ψ, γ.concludes $ uformula.and ψ φ) ∨
-                                                            (∃ x (ψ : uformula) (t : term), 
-                                                             t.denotes ∧
-                                                             x ∈ ψ.free ∧
-                                                             γ.concludes (uformula.for_all x ψ) ∧
-                                                             φ = ψ.rw x t)) ∧
-                                                             γ.proof_from
-| (argument.node φ γ₁ γ₂ argument.silence) := ((∃ ψ, γ₁.concludes (ψ ⇒ φ) ∧
-                                               γ₂.concludes ψ) ∨
-                                              (∃ x (ψ : uformula) c,
-                                               x ∈ ψ.free ∧
-                                               γ₁.concludes (uformula.exist x ψ) ∧
-                                               γ₂.concludes ((ψ.rw x $ term.abs c) ⇒ φ)) ∨
-                                              (∃ x (ψ : uformula) (t₁ t₂ : term), 
-                                               t₁.denotes ∧
-                                               t₂.denotes ∧
-                                               x ∈ ψ.free ∧
-                                               γ₁.concludes (ψ.rw x t₁) ∧
-                                               γ₂.concludes (uformula.equation t₁ t₂) ∧
-                                               φ = ψ.rw x t₂)) ∧
-                                               γ₁.proof_from ∧
-                                               γ₂.proof_from
-| (argument.node φ γ₁ γ₂ γ₃) := ∃ ψ₁ ψ₂, γ₁.concludes (uformula.or ψ₁ ψ₂) ∧
-                                         γ₂.concludes (ψ₁ ⇒ φ) ∧
-                                         γ₃.concludes (ψ₂ ⇒ φ) ∧
-                                         γ₁.proof_from ∧
-                                         γ₂.proof_from ∧
-                                         γ₃.proof_from
-| _ := false
+-- @[reducible]
+-- def argument.proof_from (Γ : set uformula) : argument → Prop
+-- | (argument.node φ argument.silence argument.silence argument.silence) := φ ∈ Γ ∨
+--                                                                           φ = uformula.true ∨
+--                                                                           ∃ t, φ = uformula.equation t t
+-- -- introduction rules
+-- | (argument.node (uformula.and φ ψ)
+--                        γ₁
+--                        γ₂
+--                        argument.silence) := γ₁.concludes φ ∧
+--                                             γ₂.concludes ψ ∧
+--                                             γ₁.proof_from ∧
+--                                             γ₂.proof_from
+-- | (argument.node (uformula.or φ _)
+--                        γ₁
+--                        argument.silence
+--                        argument.silence) := γ₁.concludes φ ∧ γ₁.proof_from
+-- | (argument.node (uformula.or _ ψ)
+--                        argument.silence
+--                        γ₂
+--                        argument.silence) := γ₂.concludes ψ ∧ γ₂.proof_from
+-- | (argument.node (uformula.if_then φ ψ)
+--                        γ
+--                        argument.silence
+--                        argument.silence) := γ.concludes ψ ∧
+--                                             γ.assumes φ ∧
+--                                             γ.proof_from
+-- | (argument.node (uformula.for_all x φ)
+--                        γ
+--                        argument.silence
+--                        argument.silence) := ∃ c, γ.concludes (φ.rw x $ term.abs c) ∧
+--                                             x ∈ φ.free ∧
+--                                             γ.proof_from
+-- | (argument.node (uformula.exist x φ)
+--                        γ
+--                        argument.silence
+--                        argument.silence) := ∃ t, γ.concludes (φ.rw x t) ∧
+--                                             t.denotes ∧
+--                                             x ∈ φ.free ∧
+--                                             γ.proof_from
+-- -- elimination rules
+-- | (argument.node φ γ argument.silence argument.silence) := ((∃ ψ, γ.concludes $ uformula.and φ ψ) ∨
+--                                                             (∃ ψ, γ.concludes $ uformula.and ψ φ) ∨
+--                                                             (∃ x (ψ : uformula) (t : term), 
+--                                                              t.denotes ∧
+--                                                              x ∈ ψ.free ∧
+--                                                              γ.concludes (uformula.for_all x ψ) ∧
+--                                                              φ = ψ.rw x t)) ∧
+--                                                              γ.proof_from
+-- | (argument.node φ γ₁ γ₂ argument.silence) := ((∃ ψ, γ₁.concludes (ψ ⇒ φ) ∧
+--                                                γ₂.concludes ψ) ∨
+--                                               (∃ x (ψ : uformula) c,
+--                                                x ∈ ψ.free ∧
+--                                                γ₁.concludes (uformula.exist x ψ) ∧
+--                                                γ₂.concludes ((ψ.rw x $ term.abs c) ⇒ φ)) ∨
+--                                               (∃ x (ψ : uformula) (t₁ t₂ : term), 
+--                                                t₁.denotes ∧
+--                                                t₂.denotes ∧
+--                                                x ∈ ψ.free ∧
+--                                                γ₁.concludes (ψ.rw x t₁) ∧
+--                                                γ₂.concludes (uformula.equation t₁ t₂) ∧
+--                                                φ = ψ.rw x t₂)) ∧
+--                                                γ₁.proof_from ∧
+--                                                γ₂.proof_from
+-- | (argument.node φ γ₁ γ₂ γ₃) := ∃ ψ₁ ψ₂, γ₁.concludes (uformula.or ψ₁ ψ₂) ∧
+--                                          γ₂.concludes (ψ₁ ⇒ φ) ∧
+--                                          γ₃.concludes (ψ₂ ⇒ φ) ∧
+--                                          γ₁.proof_from ∧
+--                                          γ₂.proof_from ∧
+--                                          γ₃.proof_from
+-- | _ := false
 
 
-def argument.proof_of (φ : uformula) (Γ : set uformula) : argument → Prop
-| γ := γ.proof_from Γ ∧ γ.concludes φ 
+-- def argument.proof_of (φ : uformula) (Γ : set uformula) : argument → Prop
+-- | γ := γ.proof_from Γ ∧ γ.concludes φ 
 
 variables (Γ : set uformula) (φ : uformula)
 
@@ -520,14 +542,14 @@ begin
     apply nonempty.elim ne, intro x,
     -- φ := "x = t₁"
     let φ := uformula.equation (term.var x) t₁.val,
-    have den₁ := t₁.property.1,
-    have den₂ := t₂.property.1,
+    have den₁ := t₁.property,
+    have den₂ := t₂.property,
     have c₀ : x ∈ φ.free, simp[φ],
     have c₁ : minimal.entails Γ (φ.rw x t₁.val),
         simp[φ],
         dunfold uformula.rw, simp,
         dunfold term.rw, simp,
-        rw den_rw t₁.val t₁.val x t₁.property.1,
+        rw den_rw t₁.val t₁.val x t₁.property,
         apply minimal.entails.identity_intro Γ t₁.val,
     have c₂ : minimal.entails Γ (φ.rw x t₂.val),
         apply minimal.entails.identity_elim, --Γ φ x c₀ t₁ t₂ den₂ den₁,
@@ -543,89 +565,89 @@ end
 
 variables (Δ : set uformula) (ψ : uformula)
 
-theorem monotonicity : Δ ⊆ Γ → minimal.entails Δ ψ → minimal.entails Γ ψ :=
-begin
-    intros H h,
-    -- induction on the possible ways in which
-    -- Δ could prove ψ
-    induction h,
-    -- case it was proven by reflection
-        apply minimal.entails.reflexive Γ h_φ,
-        exact H h_h,
-    -- case it was proven by transitivity
-        apply minimal.entails.transitivity Γ h_Δ h_φ,
-        intros ψ₂ elem,
-        repeat {assumption <|> apply_assumption},
-    -- case it was proven by and_intro
-        apply minimal.entails.and_intro,-- h_φ h_ψ Γ,
-        repeat {assumption <|> apply_assumption},
-    -- case it was proven by and_elim_left
-        apply minimal.entails.and_elim_left h_φ h_ψ Γ,
-        repeat {assumption <|> apply_assumption},
-    -- case it was proven by and_elim_right
-        apply minimal.entails.and_elim_right h_φ h_ψ Γ,
-        repeat {assumption <|> apply_assumption},
-    -- case it was proven by or_intro_left
-        apply minimal.entails.or_intro_left h_φ h_ψ Γ,
-        repeat {assumption <|> apply_assumption},
-    -- case it was proven by or_intro_right
-        apply minimal.entails.or_intro_right h_φ h_ψ Γ,
-        repeat {assumption <|> apply_assumption},
-    -- case it was proven by or_elim
-        apply minimal.entails.or_elim,-- h_φ h_ψ h_δ Γ,
-        repeat {assumption <|> apply_assumption},
-    -- case it was proven by modus ponens
-        apply minimal.entails.modus_ponens h_φ h_ψ Γ,
-        repeat {assumption <|> apply_assumption},
-    -- case it was proven by intro
-        have c : minimal.entails h_Γ (h_φ ⇒ h_ψ),
-            apply minimal.entails.intro h_φ h_ψ h_Γ,
-            assumption,
-        apply minimal.entails.transitivity Γ h_Γ (h_φ ⇒ h_ψ),
-            intros ψ₂ elem,
-            have c₂ := H elem,
-            exact minimal.entails.reflexive Γ ψ₂ c₂,
-        assumption,
-    -- case it was proven by true_intro
-        exact minimal.entails.true_intro Γ,
-    -- case it was proven by for_all_intro
-        apply minimal.entails.for_all_intro Γ h_φ h_x h_xf h_c,
-        repeat {assumption <|> apply_assumption},
-    -- case it was proven by for_all_elim
-        apply minimal.entails.for_all_elim Γ h_φ h_x h_xf,
-        repeat {assumption <|> apply_assumption},
-    -- case it was proven by exists_intro
-        apply minimal.entails.exists_intro Γ h_φ h_x h_xf h_t,
-        repeat {assumption <|> apply_assumption},
-    -- case it was proven by exists_elim
-        apply minimal.entails.exists_elim Γ h_φ h_ψ h_x h_xf,
-        repeat {assumption <|> apply_assumption},
-    -- case it was proven by identity_intro
-        apply minimal.entails.identity_intro Γ h_t,
-    -- case it was proven by identity_elim
-        apply minimal.entails.identity_elim Γ h_φ h_x h_xf h_t₁ h_t₂,
-        repeat {assumption <|> apply_assumption},
-end
+-- theorem monotonicity : Δ ⊆ Γ → minimal.entails Δ ψ → minimal.entails Γ ψ :=
+-- begin
+--     intros H h,
+--     -- induction on the possible ways in which
+--     -- Δ could prove ψ
+--     induction h,
+--     -- case it was proven by reflection
+--         apply minimal.entails.reflexive Γ h_φ,
+--         exact H h_h,
+--     -- case it was proven by transitivity
+--         apply minimal.entails.transitivity Γ h_Δ h_φ,
+--         intros ψ₂ elem,
+--         repeat {assumption <|> apply_assumption},
+--     -- case it was proven by and_intro
+--         apply minimal.entails.and_intro,-- h_φ h_ψ Γ,
+--         repeat {assumption <|> apply_assumption},
+--     -- case it was proven by and_elim_left
+--         apply minimal.entails.and_elim_left h_φ h_ψ Γ,
+--         repeat {assumption <|> apply_assumption},
+--     -- case it was proven by and_elim_right
+--         apply minimal.entails.and_elim_right h_φ h_ψ Γ,
+--         repeat {assumption <|> apply_assumption},
+--     -- case it was proven by or_intro_left
+--         apply minimal.entails.or_intro_left h_φ h_ψ Γ,
+--         repeat {assumption <|> apply_assumption},
+--     -- case it was proven by or_intro_right
+--         apply minimal.entails.or_intro_right h_φ h_ψ Γ,
+--         repeat {assumption <|> apply_assumption},
+--     -- case it was proven by or_elim
+--         apply minimal.entails.or_elim,-- h_φ h_ψ h_δ Γ,
+--         repeat {assumption <|> apply_assumption},
+--     -- case it was proven by modus ponens
+--         apply minimal.entails.modus_ponens h_φ h_ψ Γ,
+--         repeat {assumption <|> apply_assumption},
+--     -- case it was proven by intro
+--         have c : minimal.entails h_Γ (h_φ ⇒ h_ψ),
+--             apply minimal.entails.intro h_φ h_ψ h_Γ,
+--             assumption,
+--         apply minimal.entails.transitivity Γ h_Γ (h_φ ⇒ h_ψ),
+--             intros ψ₂ elem,
+--             have c₂ := H elem,
+--             exact minimal.entails.reflexive Γ ψ₂ c₂,
+--         assumption,
+--     -- case it was proven by true_intro
+--         exact minimal.entails.true_intro Γ,
+--     -- case it was proven by for_all_intro
+--         apply minimal.entails.for_all_intro Γ h_φ h_x h_xf h_c,
+--         repeat {assumption <|> apply_assumption},
+--     -- case it was proven by for_all_elim
+--         apply minimal.entails.for_all_elim Γ h_φ h_x h_xf,
+--         repeat {assumption <|> apply_assumption},
+--     -- case it was proven by exists_intro
+--         apply minimal.entails.exists_intro Γ h_φ h_x h_xf h_t,
+--         repeat {assumption <|> apply_assumption},
+--     -- case it was proven by exists_elim
+--         apply minimal.entails.exists_elim Γ h_φ h_ψ h_x h_xf,
+--         repeat {assumption <|> apply_assumption},
+--     -- case it was proven by identity_intro
+--         apply minimal.entails.identity_intro Γ h_t,
+--     -- case it was proven by identity_elim
+--         apply minimal.entails.identity_elim Γ h_φ h_x h_xf h_t₁ h_t₂,
+--         repeat {assumption <|> apply_assumption},
+-- end
 
 
-theorem proof_entails : (∃ p : argument, p.proof_of φ Γ) → minimal.entails Γ φ :=
-begin
-    intro h,
-    obtain ⟨p, ph₁, ph₂⟩ := h,
-    induction p,
-        have c : false := ph₂,
-        contradiction,
-    have eq : φ = p_a := sorry, 
-        -- impossible to unfold at ph₂ for some reason
-        -- simp [argument.concludes] at ph₂,
-    rw ←eq at ph₁,
-    admit,
-    -- induction φ,
+-- theorem proof_entails : (∃ p : argument, p.proof_of φ Γ) → minimal.entails Γ φ :=
+-- begin
+--     intro h,
+--     obtain ⟨p, ph₁, ph₂⟩ := h,
+--     induction p,
+--         have c : false := ph₂,
+--         contradiction,
+--     have eq : φ = p_a := sorry, 
+--         -- impossible to unfold at ph₂ for some reason
+--         -- simp [argument.concludes] at ph₂,
+--     rw ←eq at ph₁,
+--     admit,
+--     -- induction φ,
     
-    -- simp at ph₁,
+--     -- simp at ph₁,
 
     
-end
+-- end
 
 section semantics
 
@@ -642,45 +664,33 @@ parameter exists_ass : nonempty vasgn
 
 structure model :=
     (I₁ : Π {n}, @fint n)
-    -- required because any constant that would map
-    -- to the default value, would be a "generic point"
-    -- of the type α, i.e. any of its properties would be
-    -- true of any instance of α.
-    (constant_no_default : ∀ f : nary 0, I₁ f fin_zero_elim ≠ default α)
     (I₂ : Π {n}, @rint n)
 
 -- @[reducible]
 def model.reference' (M : model) : term → vasgn → α
 | (term.var x) asg := asg x
-| (@term.app _ _ _ _ _ _ _ 0 f _) _ := model.I₁ M f fin_zero_elim
-| (@term.app _ _ _ _ _ _ _ (n+1) f v) asg := let v₂ := λ k, model.reference' (v k) asg
+| (@term.app _ _ _ _ _  0 f _) _ := model.I₁ M f fin_zero_elim
+| (@term.app _ _ _ _ _ (n+1) f v) asg := let v₂ := λ k, model.reference' (v k) asg
                                              in model.I₁ M f v₂
--- An unavoidable trick.
--- It is just ridiculously hard to try any other
--- alternative. I gained A LOT of productivity
--- from this.
-| _ _ := default α
 
--- If the default value is considered to be
--- a non-existent reference, like an option.none,
--- then this reference is only defined for pterms.
-def model.reference (M : model) : pterm → α
-| ⟨(@term.app _ _ _ _ _ _ _ 0 f _),_⟩ := model.I₁ M f fin_zero_elim
-| ⟨(@term.app _ _ _ _ _ _ _ (n+1) f v),p⟩ := let v₂ := λ k, model.reference ⟨v k,
-                                            begin
-                                                admit,
-                                            end⟩
-                                             in model.I₁ M f v₂
-| _ := sorry
--- | t := M.reference' t.val (λx, default α)
-using_well_founded well_founded_tactics.default
--- begin
---     constructor,
---     intros x y,
---     exact `[exact well_founded_tactics.cancel_nat_add_lt],
---     exact assumption,
--- end
-
+def model.reference (M : model) : pterm → α :=
+    begin
+        intro t,
+        obtain ⟨t, den⟩ := t,
+        induction t,
+            simp [set_of] at den,
+            revert den,
+            dunfold term.denotes term.vars,
+            intro den,
+            simp at den,
+            contradiction,
+        cases t_n,
+            exact model.I₁ M t_f fin_zero_elim,
+        have den_v : ∀ x, (t_v x).denotes,
+            admit,
+        have ih := λ x, t_ih x (den_v x),
+        exact model.I₁ M t_f ih,
+    end
 
 def model.satisfies' : model → uformula → vasgn → Prop
 | M (uformula.relational r v) asg := 
@@ -865,17 +875,20 @@ begin
     -- case true.intro
     trivial,
     -- case universal intro
-    -- intros x asg h₁ h₂,
-    -- have sat := entails_ih h,
+    intros x asg h₁ h₂,
+    have sat := entails_ih h,
     -- focus {
-    --     induction entails_φ;
-    --     revert sat;
-    --     dunfold uformula.rw;
-    --     dunfold model.satisfies';
-    --     try{dunfold flip};
-    --     try{dunfold vector.of_fn};
-    --     try{dunfold vector.map},
-    --         intro sat,
+    --     induction entails_φ,
+    --     swap 5,
+    --     revert sat,
+    --     dunfold uformula.rw model.satisfies',
+    --     simp,
+    --     intro sat,
+    --     -- revert sat;
+    --     -- dunfold uformula.rw;
+    --     -- dunfold model.satisfies';
+    --     -- try{simp},
+    --         -- intro sat,
     -- },
     admit,
     -- case universal elim

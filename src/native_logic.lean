@@ -1,9 +1,66 @@
 import tactic.find tactic.tidy data.set.basic
-universe u
+universes u v
 
 namespace metalogic
 
 open tactic set
+
+inductive HProp : Type
+| intro (p : Prop) : HProp
+
+
+def is_true : HProp → Prop
+| (HProp.intro p) := p
+
+
+-- inductive andH : HProp → HProp
+-- | intro (p : HProp) : andH p
+
+
+inductive provable.prop.classical : set (Sort u) → (Sort u) → (Sort (max (u+1) v))
+| reflexive {Γ : set (Sort u)} {φ : (Sort u)} (h : φ ∈ Γ) : provable.prop.classical Γ φ
+| transitivity {Γ Δ : set (Sort u)} {φ : (Sort u)}
+               (h₁ : ∀ ψ ∈ Δ, provable.prop.classical Γ ψ)
+               (h₂ : provable.prop.classical Δ φ) 
+               : provable.prop.classical Γ φ
+| modus_ponens
+            (φ ψ : (Sort u)) (Γ : set (Sort u))
+            (h₁ : provable.prop.classical Γ (φ → ψ))
+            (h₂ : provable.prop.classical Γ φ)
+            : provable.prop.classical Γ ψ
+| intro
+            {φ ψ : (Sort u)} {Γ : set (Sort u)}
+            (h : provable.prop.classical (Γ ∪ {φ}) ψ)
+            : provable.prop.classical Γ (φ → ψ)
+-- | exfalso 
+--           (φ : (Sort u)) (Γ : set (Sort u))
+--           (h : provable.prop.classical Γ )
+--           : provable.prop.classical Γ φ
+-- | by_contradiction (φ : (Sort u)) (Γ : set (Sort u))
+--                    (h : provable.prop.classical Γ ¬¬φ)
+--                    : provable.prop.classical Γ φ
+                   
+
+variables {Γ : set Prop} {φ : Prop}
+#check provable.prop.classical.{0}
+
+example : φ → provable.prop.classical.{0} Γ φ :=
+begin
+    intro h,
+    have c₁ : φ = true, simp [h],
+    have c₂ : (φ → φ) = true, simp,
+    rw [c₁,←c₂],
+    apply provable.prop.classical.intro,
+    apply provable.prop.classical.reflexive,
+    simp,
+end
+
+-- example : φ → provable.prop.classical.{1} ∅ (provable.prop.classical.{0} Γ φ) :=
+-- begin
+    
+-- end
+
+
 
 -- We wanted to define what a tautology is in order
 -- to define a necessitation rule for normal modal logics
@@ -95,7 +152,7 @@ inductive provable.minimal : set Prop → Prop → Prop
             (eq : provable.minimal Γ (c₁ = c₂))
              : provable.minimal Γ (p c₂)
 
-variables {Γ : set Prop} {φ : Prop}
+-- variables {Γ : set Prop} {φ : Prop}
 
 example : provable.minimal.{u} Γ (φ → φ) :=
 begin
